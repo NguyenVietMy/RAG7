@@ -277,6 +277,7 @@ export default function ChatUI() {
             rag_n_results: ragSettings.rag_n_results,
             rag_similarity_threshold: ragSettings.rag_similarity_threshold,
             rag_max_context_tokens: ragSettings.rag_max_context_tokens,
+            chat_model: ragSettings.chat_model,
           };
         }
       } catch (err) {
@@ -292,6 +293,7 @@ export default function ChatUI() {
           rag_n_results: ragConfig.rag_n_results,
           rag_similarity_threshold: ragConfig.rag_similarity_threshold,
           rag_max_context_tokens: ragConfig.rag_max_context_tokens,
+          model: ragConfig.chat_model,
         }),
       });
 

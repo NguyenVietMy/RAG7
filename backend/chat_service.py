@@ -12,14 +12,15 @@ logger = logging.getLogger(__name__)
 
 
 class ChatService:
-    def __init__(self):
+    def __init__(self, model: Optional[str] = None):
         api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY must be set")
         
         http_client = httpx.Client(timeout=httpx.Timeout(60.0))
         self.client = OpenAI(api_key=api_key, http_client=http_client)
-        self.model = os.getenv("CHAT_MODEL", "gpt-4o-mini")
+        # Use provided model, or env var, or default
+        self.model = model or os.getenv("CHAT_MODEL", "gpt-4o-mini")
         self.max_context_messages = int(os.getenv("MAX_CONTEXT_MESSAGES", "20"))
     
     def generate_title(self, user_message: str) -> str:

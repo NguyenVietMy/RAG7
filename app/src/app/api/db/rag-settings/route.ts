@@ -15,6 +15,7 @@ export async function GET() {
         rag_n_results: 3,
         rag_similarity_threshold: 0.0,
         rag_max_context_tokens: 2000,
+        chat_model: 'gpt-4o-mini',
       });
     }
 
@@ -31,7 +32,7 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { rag_n_results, rag_similarity_threshold, rag_max_context_tokens } = body;
+    const { rag_n_results, rag_similarity_threshold, rag_max_context_tokens, chat_model } = body;
 
     // Check if config exists
     const checkResult = await query('SELECT id FROM rag_settings LIMIT 1');
@@ -44,23 +45,30 @@ export async function PUT(request: NextRequest) {
          SET rag_n_results = $1, 
              rag_similarity_threshold = $2, 
              rag_max_context_tokens = $3,
+             chat_model = COALESCE($4, chat_model),
              updated_at = NOW()
-         WHERE id = $4
+         WHERE id = $5
          RETURNING *`,
         [
           rag_n_results,
           rag_similarity_threshold,
           rag_max_context_tokens,
+          chat_model || null,
           checkResult.rows[0].id,
         ]
       );
     } else {
       // Insert new
       result = await query(
-        `INSERT INTO rag_settings (rag_n_results, rag_similarity_threshold, rag_max_context_tokens, created_at, updated_at)
-         VALUES ($1, $2, $3, NOW(), NOW())
+        `INSERT INTO rag_settings (rag_n_results, rag_similarity_threshold, rag_max_context_tokens, chat_model, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, NOW(), NOW())
          RETURNING *`,
-        [rag_n_results, rag_similarity_threshold, rag_max_context_tokens]
+        [
+          rag_n_results, 
+          rag_similarity_threshold, 
+          rag_max_context_tokens,
+          chat_model || 'gpt-4o-mini'
+        ]
       );
     }
 

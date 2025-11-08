@@ -496,6 +496,7 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     collection_name: Optional[str] = None  # Optional: for RAG
     stream: bool = False
+    model: Optional[str] = None  # Override chat model
     rag_n_results: Optional[int] = None  # Override user's RAG config
     rag_similarity_threshold: Optional[float] = None
     rag_max_context_tokens: Optional[int] = None
@@ -533,17 +534,19 @@ def chat(body: ChatRequest):
         defaults = {
             "rag_n_results": 3,
             "rag_similarity_threshold": 0.0,
-            "rag_max_context_tokens": 2000
+            "rag_max_context_tokens": 2000,
+            "chat_model": "gpt-4o-mini"
         }
         
         rag_n_results = body.rag_n_results if body.rag_n_results is not None else (rag_config.get("rag_n_results") if rag_config else defaults["rag_n_results"])
         rag_similarity_threshold = body.rag_similarity_threshold if body.rag_similarity_threshold is not None else (rag_config.get("rag_similarity_threshold") if rag_config else defaults["rag_similarity_threshold"])
         rag_max_context_tokens = body.rag_max_context_tokens if body.rag_max_context_tokens is not None else (rag_config.get("rag_max_context_tokens") if rag_config else defaults["rag_max_context_tokens"])
+        chat_model = body.model if body.model is not None else (rag_config.get("chat_model") if rag_config else defaults["chat_model"])
         
-        logger.info(f"Using RAG config: n_results={rag_n_results}, threshold={rag_similarity_threshold}, max_tokens={rag_max_context_tokens}")
+        logger.info(f"Using RAG config: n_results={rag_n_results}, threshold={rag_similarity_threshold}, max_tokens={rag_max_context_tokens}, model={chat_model}")
         
-        # Initialize chat service
-        chat_service = ChatService()
+        # Initialize chat service with model
+        chat_service = ChatService(model=chat_model)
         
         try:
             # Generate response

@@ -129,6 +129,7 @@ class ApiClient {
     messages: Array<{ role: string; content: string }>;
     collection_name?: string;
     stream?: boolean;
+    model?: string;
     rag_n_results?: number;
     rag_similarity_threshold?: number;
     rag_max_context_tokens?: number;

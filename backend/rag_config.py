@@ -52,11 +52,15 @@ def get_rag_config() -> Optional[dict]:
             
             if row:
                 logger.info(f"Retrieved RAG config: rag_n_results={row['rag_n_results']}, threshold={row['rag_similarity_threshold']}, max_tokens={row['rag_max_context_tokens']}")
-                return {
+                config = {
                     "rag_n_results": row["rag_n_results"],
                     "rag_similarity_threshold": float(row["rag_similarity_threshold"]),
                     "rag_max_context_tokens": row["rag_max_context_tokens"],
                 }
+                # Add chat_model if it exists
+                if "chat_model" in row and row["chat_model"]:
+                    config["chat_model"] = row["chat_model"]
+                return config
             logger.debug("No RAG config found")
             return None
     except Exception as e:

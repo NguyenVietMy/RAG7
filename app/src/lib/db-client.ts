@@ -62,6 +62,7 @@ export class DBClient {
     rag_n_results: number;
     rag_similarity_threshold: number;
     rag_max_context_tokens: number;
+    chat_model?: string;
   }) {
     return this.query('/db/rag-settings', 'PUT', data);
   }

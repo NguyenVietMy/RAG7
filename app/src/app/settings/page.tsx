@@ -20,6 +20,7 @@ interface RAGConfig {
   rag_n_results: number;
   rag_similarity_threshold: number;
   rag_max_context_tokens: number;
+  chat_model?: string;
 }
 
 export default function SettingsPage() {
@@ -27,6 +28,7 @@ export default function SettingsPage() {
     rag_n_results: 3,
     rag_similarity_threshold: 0.0,
     rag_max_context_tokens: 2000,
+    chat_model: "gpt-4o-mini",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -47,11 +49,15 @@ export default function SettingsPage() {
           rag_n_results: data.rag_n_results,
           rag_similarity_threshold: data.rag_similarity_threshold,
           rag_max_context_tokens: data.rag_max_context_tokens,
+          chat_model: data.chat_model || "gpt-4o-mini",
         });
       } else {
         // No config found, use defaults
         const defaultConfig = await apiClient.getRAGConfig();
-        setConfig(defaultConfig);
+        setConfig({
+          ...defaultConfig,
+          chat_model: "gpt-4o-mini",
+        });
       }
     } catch (error) {
       console.error("Error loading config:", error);
@@ -77,6 +83,7 @@ export default function SettingsPage() {
         rag_n_results: validatedConfig.rag_n_results,
         rag_similarity_threshold: validatedConfig.rag_similarity_threshold,
         rag_max_context_tokens: validatedConfig.rag_max_context_tokens,
+        chat_model: config.chat_model,
       });
 
       toast({
@@ -227,6 +234,37 @@ export default function SettingsPage() {
               <p className="text-xs text-gray-500">
                 Limits the total size of context sent to the AI. Larger values
                 allow more context but increase token usage.
+              </p>
+            </div>
+
+            {/* Chat Model Selection */}
+            <div className="space-y-2 pt-4 border-t border-gray-200">
+              <Label htmlFor="chat_model">Chat Model</Label>
+              <select
+                id="chat_model"
+                value={config.chat_model || "gpt-4o-mini"}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    chat_model: e.target.value,
+                  })
+                }
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black bg-white"
+              >
+                <option value="gpt-4o-mini">
+                  gpt-4o-mini (Fast, Cost-effective)
+                </option>
+                <option value="gpt-4o">gpt-4o (More capable)</option>
+                <option value="gpt-4-turbo">
+                  gpt-4-turbo (High performance)
+                </option>
+                <option value="gpt-3.5-turbo">
+                  gpt-3.5-turbo (Legacy, Fast)
+                </option>
+              </select>
+              <p className="text-xs text-gray-500">
+                The model used for generating chat responses. gpt-4o-mini is
+                recommended for most use cases.
               </p>
             </div>
 
