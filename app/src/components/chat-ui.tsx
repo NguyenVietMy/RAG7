@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Pencil, Search, Send, Plus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { apiClient } from "@/lib/api-client";
-import { createClient } from "../../supabase/client";
+import { dbClient } from "@/lib/db-client";
 
 type ChatMessage = {
   id: string;
@@ -71,18 +71,9 @@ export default function ChatUI() {
   const loadChats = async () => {
     setIsLoadingChats(true);
     try {
-      const supabase = createClient();
+      const data = await dbClient.getChats();
 
-      const { data, error: dbError } = await supabase
-        .from("chats")
-        .select("*")
-        .eq("is_archived", false)
-        .order("last_message_at", { ascending: false })
-        .limit(50); // Limit to recent chats
-
-      if (dbError) throw dbError;
-
-      const loadedChats: Chat[] = (data || []).map((chat) => ({
+      const loadedChats: Chat[] = (data || []).map((chat: any) => ({
         id: chat.id,
         title: chat.title,
         messages: [], // Load messages separately
@@ -102,18 +93,9 @@ export default function ChatUI() {
 
   const loadMessages = async (chatId: string) => {
     try {
-      const supabase = createClient();
+      const data = await dbClient.getMessages(chatId);
 
-      const { data, error: dbError } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("chat_id", chatId)
-        .order("created_at", { ascending: true })
-        .limit(100); // Load last 100 messages
-
-      if (dbError) throw dbError;
-
-      const messages: ChatMessage[] = (data || []).map((msg) => ({
+      const messages: ChatMessage[] = (data || []).map((msg: any) => ({
         id: msg.id,
         role: msg.role as "user" | "assistant",
         content: msg.content,
@@ -138,19 +120,11 @@ export default function ChatUI() {
     content: string
   ): Promise<string | null> => {
     try {
-      const supabase = createClient();
-
-      const { data, error: dbError } = await supabase
-        .from("messages")
-        .insert({
-          chat_id: chatId,
-          role,
-          content,
-        })
-        .select()
-        .single();
-
-      if (dbError) throw dbError;
+      const data = await dbClient.createMessage({
+        chat_id: chatId,
+        role,
+        content,
+      });
       return data?.id || null;
     } catch (err: any) {
       console.error("Failed to save message:", err);
@@ -164,15 +138,10 @@ export default function ChatUI() {
         user_message: userMessage,
       });
 
-      const supabase = createClient();
-
-      await supabase
-        .from("chats")
-        .update({
-          title: response.title,
-          title_refined: true,
-        })
-        .eq("id", chatId);
+      await dbClient.updateChat(chatId, {
+        title: response.title,
+        title_refined: true,
+      });
 
       // Update local state
       setChats((prevChats) =>
@@ -204,15 +173,8 @@ export default function ChatUI() {
     }
 
     try {
-      const supabase = createClient();
-
       // Delete chat (CASCADE DELETE will automatically delete all messages)
-      const { error: deleteError } = await supabase
-        .from("chats")
-        .delete()
-        .eq("id", chatId);
-
-      if (deleteError) throw deleteError;
+      await dbClient.deleteChat(chatId);
 
       // Remove from local state
       setChats((prevChats) => prevChats.filter((chat) => chat.id !== chatId));
@@ -237,24 +199,17 @@ export default function ChatUI() {
     setError(null);
 
     try {
-      const supabaseClient = createClient();
-
       // Create new chat if none is active
       let chatIdToUse = activeChatId;
       let isNewChat = false;
 
       if (!chatIdToUse) {
         const initialTitle = userMessage.substring(0, 50) || "New chat";
-        const { data: newChat, error: chatError } = await supabaseClient
-          .from("chats")
-          .insert({
-            title: initialTitle,
-            collection_name: selectedCollection,
-          })
-          .select()
-          .single();
+        const newChat = await dbClient.createChat({
+          title: initialTitle,
+          collection_name: selectedCollection,
+        });
 
-        if (chatError) throw chatError;
         chatIdToUse = newChat.id;
         isNewChat = true;
 
@@ -312,16 +267,12 @@ export default function ChatUI() {
       const activeChatCollection =
         activeChat?.collection_name || selectedCollection;
 
-      // Load RAG config from Supabase (single config for local app)
+      // Load RAG config from database (single config for local app)
       let ragConfig = null;
       try {
-        const { data: ragSettings, error: ragError } = await supabaseClient
-          .from("rag_settings")
-          .select("*")
-          .limit(1)
-          .single();
+        const ragSettings = await dbClient.getRAGSettings();
 
-        if (!ragError && ragSettings) {
+        if (ragSettings) {
           ragConfig = {
             rag_n_results: ragSettings.rag_n_results,
             rag_similarity_threshold: ragSettings.rag_similarity_threshold,
@@ -334,17 +285,15 @@ export default function ChatUI() {
 
       // Call backend API (no user ID needed for local app)
       // Pass RAG config explicitly to ensure it's used
-      const response = await apiClient.chat(
-        {
-          messages: apiMessages,
-          collection_name: activeChatCollection || undefined,
-          ...(ragConfig && {
-            rag_n_results: ragConfig.rag_n_results,
-            rag_similarity_threshold: ragConfig.rag_similarity_threshold,
-            rag_max_context_tokens: ragConfig.rag_max_context_tokens,
-          }),
-        }
-      );
+      const response = await apiClient.chat({
+        messages: apiMessages,
+        collection_name: activeChatCollection || undefined,
+        ...(ragConfig && {
+          rag_n_results: ragConfig.rag_n_results,
+          rag_similarity_threshold: ragConfig.rag_similarity_threshold,
+          rag_max_context_tokens: ragConfig.rag_max_context_tokens,
+        }),
+      });
 
       // Save assistant message
       const assistantMessageId = await saveMessage(

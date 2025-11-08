@@ -14,7 +14,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import DashboardNavbar from "@/components/dashboard-navbar";
 import { apiClient } from "@/lib/api-client";
-import { createClient } from "../../../supabase/client";
+import { dbClient } from "@/lib/db-client";
 import { toast } from "@/components/ui/use-toast";
 
 interface RAGConfig {
@@ -39,23 +39,11 @@ export default function SettingsPage() {
   const loadConfig = async () => {
     try {
       setLoading(true);
-      const supabase = createClient();
 
-      // Load from Supabase (single config for local app)
-      const { data, error } = await supabase
-        .from("rag_settings")
-        .select("*")
-        .limit(1)
-        .single();
+      // Load from database (single config for local app)
+      const data = await dbClient.getRAGSettings();
 
-      if (error && error.code !== "PGRST116") {
-        // PGRST116 = no rows returned, use defaults
-        const defaultConfig = await apiClient.getRAGConfig();
-        setConfig(defaultConfig);
-        return;
-      }
-
-      if (data) {
+      if (data && data.rag_n_results) {
         setConfig({
           rag_n_results: data.rag_n_results,
           rag_similarity_threshold: data.rag_similarity_threshold,
@@ -85,39 +73,12 @@ export default function SettingsPage() {
       // Validate config via backend (optional, but good for validation)
       const validatedConfig = await apiClient.updateRAGConfig(config);
 
-      // Save directly to Supabase (single config for local app)
-      const supabase = createClient();
-      
-      // Get existing config or create new one
-      const { data: existing } = await supabase
-        .from("rag_settings")
-        .select("id")
-        .limit(1)
-        .single();
-
-      if (existing) {
-        // Update existing
-        const { error } = await supabase
-          .from("rag_settings")
-          .update({
-            rag_n_results: validatedConfig.rag_n_results,
-            rag_similarity_threshold: validatedConfig.rag_similarity_threshold,
-            rag_max_context_tokens: validatedConfig.rag_max_context_tokens,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existing.id);
-
-        if (error) throw error;
-      } else {
-        // Insert new
-        const { error } = await supabase.from("rag_settings").insert({
-          rag_n_results: validatedConfig.rag_n_results,
-          rag_similarity_threshold: validatedConfig.rag_similarity_threshold,
-          rag_max_context_tokens: validatedConfig.rag_max_context_tokens,
-        });
-
-        if (error) throw error;
-      }
+      // Save directly to database (single config for local app)
+      await dbClient.upsertRAGSettings({
+        rag_n_results: validatedConfig.rag_n_results,
+        rag_similarity_threshold: validatedConfig.rag_similarity_threshold,
+        rag_max_context_tokens: validatedConfig.rag_max_context_tokens,
+      });
 
       toast({
         title: "Success",

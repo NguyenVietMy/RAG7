@@ -5,7 +5,6 @@ import DashboardNavbar from "@/components/dashboard-navbar";
 import { chunkText } from "@/lib/chunk";
 import { useDropzone } from "react-dropzone";
 import { apiClient } from "@/lib/api-client";
-import { createClient } from "../../../supabase/client";
 
 type ParsedFile = {
   name: string;

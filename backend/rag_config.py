@@ -1,8 +1,9 @@
 import os
 from pathlib import Path
 from typing import Optional
-import httpx
 import logging
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 from dotenv import load_dotenv
 
@@ -17,128 +18,102 @@ load_dotenv(dotenv_path=_PARENT_ENV_PATH if _PARENT_ENV_PATH.exists() else None,
 logger = logging.getLogger(__name__)
 
 
-def _get_supabase_url() -> Optional[str]:
-    """Get Supabase URL from environment."""
-    # Try multiple possible env var names
-    url = (
-        os.getenv("SUPABASE_URL") 
-        or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-        or os.getenv("SUPABASE_PROJECT_URL")
-    )
-    
-    if not url:
-        logger.debug("Supabase URL not found in environment variables. Checked: SUPABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_PROJECT_URL")
-    
-    return url
-
-
-def _get_supabase_key() -> Optional[str]:
-    """Get Supabase API key from environment."""
-    # Try multiple possible env var names (prefer service role key for backend)
-    key = (
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-    )
-    
-    if not key:
-        logger.debug("Supabase API key not found in environment variables. Checked: SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, NEXT_PUBLIC_SUPABASE_ANON_KEY")
-    
-    return key
+def _get_db_connection():
+    """Get PostgreSQL database connection."""
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=int(os.getenv("POSTGRES_PORT", "5433")),
+            database=os.getenv("POSTGRES_DB", "lola_db"),
+            user=os.getenv("POSTGRES_USER", "lola"),
+            password=os.getenv("POSTGRES_PASSWORD", "lola_dev_password"),
+        )
+        return conn
+    except Exception as e:
+        logger.error(f"Failed to connect to PostgreSQL: {str(e)}")
+        return None
 
 
 def get_rag_config() -> Optional[dict]:
     """
-    Get RAG configuration from Supabase via HTTP API (single config for local app).
-    Returns None if settings don't exist or Supabase is not configured.
+    Get RAG configuration from PostgreSQL (single config for local app).
+    Returns None if settings don't exist or database is not configured.
     """
-    supabase_url = _get_supabase_url()
-    supabase_key = _get_supabase_key()
-    
-    if not supabase_url or not supabase_key:
+    conn = _get_db_connection()
+    if not conn:
         return None
     
     try:
-        # Supabase REST API: GET /rest/v1/rag_settings (single config)
-        url = f"{supabase_url}/rest/v1/rag_settings"
-        headers = {
-            "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}",
-            "Content-Type": "application/json",
-        }
-        # Get first config (limit=1)
-        params = {"limit": "1"}
-        
-        with httpx.Client(timeout=10.0) as client:
-            response = client.get(url, headers=headers, params=params)
-            response.raise_for_status()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM rag_settings ORDER BY created_at DESC LIMIT 1"
+            )
+            row = cur.fetchone()
             
-            data = response.json()
-            if data and len(data) > 0:
-                settings = data[0]
-                logger.info(f"Retrieved RAG config: rag_n_results={settings.get('rag_n_results')}, threshold={settings.get('rag_similarity_threshold')}, max_tokens={settings.get('rag_max_context_tokens')}")
+            if row:
+                logger.info(f"Retrieved RAG config: rag_n_results={row['rag_n_results']}, threshold={row['rag_similarity_threshold']}, max_tokens={row['rag_max_context_tokens']}")
                 return {
-                    "rag_n_results": settings.get("rag_n_results", 3),
-                    "rag_similarity_threshold": float(settings.get("rag_similarity_threshold", 0.0)),
-                    "rag_max_context_tokens": settings.get("rag_max_context_tokens", 2000),
+                    "rag_n_results": row["rag_n_results"],
+                    "rag_similarity_threshold": float(row["rag_similarity_threshold"]),
+                    "rag_max_context_tokens": row["rag_max_context_tokens"],
                 }
             logger.debug("No RAG config found")
             return None
     except Exception as e:
-        logger.warning(f"Error fetching RAG config from Supabase: {str(e)}")
+        logger.warning(f"Error fetching RAG config from PostgreSQL: {str(e)}")
         return None
+    finally:
+        conn.close()
 
 
 def upsert_rag_config(config: dict) -> bool:
     """
-    Create or update RAG configuration in Supabase via HTTP API (single config for local app).
+    Create or update RAG configuration in PostgreSQL (single config for local app).
     Returns True if successful, False otherwise.
     """
-    supabase_url = _get_supabase_url()
-    supabase_key = _get_supabase_key()
-    
-    if not supabase_url or not supabase_key:
-        logger.warning("Supabase URL or API key not configured")
+    conn = _get_db_connection()
+    if not conn:
+        logger.warning("PostgreSQL connection not available")
         return False
     
     try:
-        # Supabase REST API: First check if config exists, then update or insert
-        url = f"{supabase_url}/rest/v1/rag_settings"
-        headers = {
-            "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}",
-            "Content-Type": "application/json",
-        }
-        
-        # Check if config exists
-        with httpx.Client(timeout=10.0) as client:
-            check_response = client.get(url, headers=headers, params={"limit": "1"})
-            check_response.raise_for_status()
-            existing = check_response.json()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Check if config exists
+            cur.execute("SELECT id FROM rag_settings LIMIT 1")
+            existing = cur.fetchone()
             
-            payload = {
-                "rag_n_results": config.get("rag_n_results", 3),
-                "rag_similarity_threshold": config.get("rag_similarity_threshold", 0.0),
-                "rag_max_context_tokens": config.get("rag_max_context_tokens", 2000),
-            }
+            rag_n_results = config.get("rag_n_results", 3)
+            rag_similarity_threshold = config.get("rag_similarity_threshold", 0.0)
+            rag_max_context_tokens = config.get("rag_max_context_tokens", 2000)
             
-            if existing and len(existing) > 0:
+            if existing:
                 # Update existing
-                config_id = existing[0]["id"]
-                update_url = f"{url}?id=eq.{config_id}"
-                response = client.patch(update_url, headers=headers, json=payload)
+                cur.execute(
+                    """UPDATE rag_settings 
+                       SET rag_n_results = %s, 
+                           rag_similarity_threshold = %s, 
+                           rag_max_context_tokens = %s,
+                           updated_at = NOW()
+                       WHERE id = %s""",
+                    [rag_n_results, rag_similarity_threshold, rag_max_context_tokens, existing["id"]]
+                )
             else:
                 # Insert new
-                response = client.post(url, headers=headers, json=payload)
+                cur.execute(
+                    """INSERT INTO rag_settings 
+                       (rag_n_results, rag_similarity_threshold, rag_max_context_tokens, created_at, updated_at)
+                       VALUES (%s, %s, %s, NOW(), NOW())""",
+                    [rag_n_results, rag_similarity_threshold, rag_max_context_tokens]
+                )
             
-            response.raise_for_status()
+            conn.commit()
             return True
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error upserting RAG config: {e.response.status_code} - {e.response.text}")
-        return False
     except Exception as e:
-        logger.error(f"Error upserting RAG config to Supabase: {str(e)}")
+        logger.error(f"Error upserting RAG config to PostgreSQL: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
+        conn.rollback()
         return False
+    finally:
+        conn.close()
 
