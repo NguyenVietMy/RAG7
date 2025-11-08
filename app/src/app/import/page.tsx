@@ -122,20 +122,8 @@ export default function ImportPage() {
         throw new Error("Invalid professional name");
       }
 
-      // Create collection in ChromaDB first
+      // Create collection in ChromaDB
       await apiClient.createCollection(sanitizedCollectionName);
-
-      // Insert professional record in database
-      const { error: dbError } = await supabase.from("professionals").insert({
-        user_id: user.id,
-        collection_name: sanitizedCollectionName,
-        name: newProfessionalName,
-        description: newProfessionalDescription || null,
-      });
-
-      if (dbError) {
-        throw new Error(`Failed to create professional: ${dbError.message}`);
-      }
 
       // Reload collections
       await loadCollections();

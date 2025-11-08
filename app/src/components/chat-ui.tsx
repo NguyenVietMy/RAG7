@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Pencil, Search, Send, Plus, Loader2 } from "lucide-react";
+import { Pencil, Search, Send, Plus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { apiClient } from "@/lib/api-client";
 import { createClient } from "../../supabase/client";
@@ -216,6 +216,51 @@ export default function ChatUI() {
     setActiveChatId(null);
     setInputValue("");
     setError(null);
+  };
+
+  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent chat selection when clicking delete
+
+    if (
+      !confirm(
+        "Are you sure you want to delete this chat? All messages will be permanently deleted."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setError("Please sign in to delete chats");
+        return;
+      }
+
+      // Delete chat (CASCADE DELETE will automatically delete all messages)
+      const { error: deleteError } = await supabase
+        .from("chats")
+        .delete()
+        .eq("id", chatId)
+        .eq("user_id", user.id);
+
+      if (deleteError) throw deleteError;
+
+      // Remove from local state
+      setChats((prevChats) => prevChats.filter((chat) => chat.id !== chatId));
+
+      // If deleted chat was active, clear active chat
+      if (activeChatId === chatId) {
+        setActiveChatId(null);
+        setInputValue("");
+      }
+    } catch (err: any) {
+      console.error("Failed to delete chat:", err);
+      setError(err?.message || "Failed to delete chat");
+    }
   };
 
   const handleSendMessage = async () => {
@@ -468,22 +513,37 @@ export default function ChatUI() {
             ) : (
               <div className="space-y-1">
                 {filteredChats.map((chat) => (
-                  <button
+                  <div
                     key={chat.id}
-                    onClick={() => setActiveChatId(chat.id)}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                    className={`group relative flex items-center gap-2 rounded-lg text-sm transition-colors ${
                       activeChatId === chat.id
-                        ? "bg-gray-100 text-black font-medium"
-                        : "text-gray-700 hover:bg-gray-50"
+                        ? "bg-gray-100"
+                        : "hover:bg-gray-50"
                     }`}
                   >
-                    <div className="truncate">{chat.title}</div>
-                    {chat.message_count && chat.message_count > 0 && (
-                      <div className="text-xs text-gray-400 mt-0.5">
-                        {chat.message_count} messages
-                      </div>
-                    )}
-                  </button>
+                    <button
+                      onClick={() => setActiveChatId(chat.id)}
+                      className={`flex-1 text-left px-3 py-2 ${
+                        activeChatId === chat.id
+                          ? "text-black font-medium"
+                          : "text-gray-700"
+                      }`}
+                    >
+                      <div className="truncate">{chat.title}</div>
+                      {chat.message_count && chat.message_count > 0 && (
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          {chat.message_count} messages
+                        </div>
+                      )}
+                    </button>
+                    <button
+                      onClick={(e) => handleDeleteChat(chat.id, e)}
+                      className="opacity-0 group-hover:opacity-100 p-2 text-gray-400 hover:text-red-600 transition-all"
+                      title="Delete chat"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 ))}
                 {filteredChats.length === 0 && !isLoadingChats && (
                   <div className="px-3 py-2 text-sm text-gray-400">
