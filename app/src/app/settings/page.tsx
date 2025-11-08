@@ -255,12 +255,6 @@ export default function SettingsPage() {
                   gpt-4o-mini (Fast, Cost-effective)
                 </option>
                 <option value="gpt-4o">gpt-4o (More capable)</option>
-                <option value="gpt-4-turbo">
-                  gpt-4-turbo (High performance)
-                </option>
-                <option value="gpt-3.5-turbo">
-                  gpt-3.5-turbo (Legacy, Fast)
-                </option>
               </select>
               <p className="text-xs text-gray-500">
                 The model used for generating chat responses. gpt-4o-mini is
