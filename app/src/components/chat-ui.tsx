@@ -116,7 +116,8 @@ export default function ChatUI() {
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: "This is a placeholder response. The AI assistant functionality will be implemented separately.",
+        content:
+          "This is a placeholder response. The AI assistant functionality will be implemented separately.",
       };
 
       setChats((prevChats) =>
@@ -308,4 +309,3 @@ export default function ChatUI() {
     </div>
   );
 }
-
