@@ -1,36 +1,33 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Upload, Cpu, MessageSquare } from "lucide-react";
+import { TrendingUp, Database, Brain } from "lucide-react";
 
-const steps = [
+const features = [
   {
-    number: "01",
-    icon: Upload,
-    title: "Upload",
+    icon: Database,
+    title: "Unlimited Documents",
     description:
-      "Drop your documents, PDFs, or data files into Lola. We support all major formats.",
+      "Add as many documents as you need. There's no limit to how much knowledge Lola can learn and retain.",
   },
   {
-    number: "02",
-    icon: Cpu,
-    title: "Index",
+    icon: TrendingUp,
+    title: "Growing Intelligence",
     description:
-      "Our AI processes and indexes your content, creating a knowledge base tailored to your needs.",
+      "With each document, Lola becomes smarter, more accurate, and more valuable as your AI professional.",
   },
   {
-    number: "03",
-    icon: MessageSquare,
-    title: "Chat",
+    icon: Brain,
+    title: "Continuous Learning",
     description:
-      "Ask questions and get intelligent, cited answers from your AI professional instantly.",
+      "Your knowledge base grows with your needs. The more you feed it, the better it serves you.",
   },
 ];
 
-export default function HowItWorks() {
+export default function Scalability() {
   return (
     <section
-      id="how-it-works"
+      id="scalability"
       className="py-24 bg-gradient-to-b from-[#0F172A] to-[#1E293B] relative overflow-hidden"
     >
       <div className="container mx-auto px-4 relative">
@@ -42,16 +39,16 @@ export default function HowItWorks() {
           className="text-center mb-20"
         >
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            How Lola Works
+            IT SCALES INFINITELY
           </h2>
           <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-            Get started in three simple steps
+            The more documents you add to train, the more intelligent
           </p>
         </motion.div>
 
         <div className="relative max-w-5xl mx-auto">
           <div className="grid md:grid-cols-3 gap-8 lg:gap-12 items-stretch">
-            {steps.map((step, index) => (
+            {features.map((feature, index) => (
               <motion.div
                 key={index}
                 initial={{ opacity: 0, y: 30 }}
@@ -61,22 +58,17 @@ export default function HowItWorks() {
                 className="relative flex flex-col"
               >
                 <div className="relative bg-gradient-to-br from-gray-800/80 to-gray-900/80 backdrop-blur-sm rounded-2xl border border-gray-700/50 p-8 hover:border-[#3B82F6]/50 transition-all duration-300 group flex-1 flex flex-col">
-                  {/* Step Number */}
-                  <div className="absolute -top-6 left-8 text-6xl font-bold text-[#3B82F6]/20 group-hover:text-[#3B82F6]/30 transition-colors">
-                    {step.number}
-                  </div>
-
                   {/* Icon */}
                   <div className="relative w-16 h-16 rounded-xl bg-[#3B82F6]/10 flex items-center justify-center mb-6 group-hover:bg-[#3B82F6]/20 transition-colors">
-                    <step.icon className="w-8 h-8 text-[#3B82F6]" />
+                    <feature.icon className="w-8 h-8 text-[#3B82F6]" />
                   </div>
 
                   {/* Content */}
                   <h3 className="text-2xl font-bold text-white mb-4">
-                    {step.title}
+                    {feature.title}
                   </h3>
                   <p className="text-gray-400 leading-relaxed flex-grow">
-                    {step.description}
+                    {feature.description}
                   </p>
                 </div>
               </motion.div>

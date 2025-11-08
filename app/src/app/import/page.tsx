@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import DashboardNavbar from "@/components/dashboard-navbar";
 import { chunkText } from "@/lib/chunk";
 import { useDropzone } from "react-dropzone";
@@ -37,6 +38,7 @@ type Collection = {
 };
 
 export default function ImportPage() {
+  const router = useRouter();
   const [parsedFiles, setParsedFiles] = useState<ParsedFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [collectionName, setCollectionName] = useState<string>("");
@@ -54,6 +56,22 @@ export default function ImportPage() {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<Set<string>>(new Set());
+
+  // Auth guard - check if user is logged in
+  useEffect(() => {
+    const checkAuth = async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/sign-in");
+      }
+    };
+
+    checkAuth();
+  }, [router]);
 
   // Fetch collections on mount
   useEffect(() => {

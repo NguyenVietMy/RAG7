@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,7 @@ interface RAGConfig {
 }
 
 export default function SettingsPage() {
+  const router = useRouter();
   const [config, setConfig] = useState<RAGConfig>({
     rag_n_results: 3,
     rag_similarity_threshold: 0.0,
@@ -32,6 +34,22 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+
+  // Auth guard - check if user is logged in
+  useEffect(() => {
+    const checkAuth = async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/sign-in");
+      }
+    };
+
+    checkAuth();
+  }, [router]);
 
   useEffect(() => {
     loadConfig();

@@ -1,8 +1,8 @@
-import Footer from "@/components/footer"
-import Hero from "@/components/hero"
-import Navbar from "@/components/navbar"
-import ValueProps from "@/components/value-props"
-import HowItWorks from "@/components/how-it-works"
+import Hero from "@/components/hero";
+import Navbar from "@/components/navbar";
+import ValueProps from "@/components/value-props";
+import HowItWorks from "@/components/how-it-works";
+import Scalability from "@/components/scalability";
 
 export default function Home() {
   return (
@@ -11,7 +11,7 @@ export default function Home() {
       <Hero />
       <ValueProps />
       <HowItWorks />
-      <Footer />
+      <Scalability />
     </div>
-  )
+  );
 }
