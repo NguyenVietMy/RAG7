@@ -1,3 +1,9 @@
 .env
 __pycache__/
 pyrightconfig.json
+
+# Planning and implementation documentation (not needed in repo)
+MCP_SERVER_PLAN.md
+WEB_CRAWLING_IMPLEMENTATION.md
+MCP_INTEGRATION_SUMMARY.md
+MCP_SETUP.md
