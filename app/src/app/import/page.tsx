@@ -5,6 +5,17 @@ import DashboardNavbar from "@/components/dashboard-navbar";
 import { chunkText } from "@/lib/chunk";
 import { useDropzone } from "react-dropzone";
 import { apiClient } from "@/lib/api-client";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/use-toast";
+import { FileText, Database, RefreshCw, Trash2 } from "lucide-react";
 
 type ParsedFile = {
   name: string;
@@ -35,6 +46,22 @@ type Collection = {
   count?: number;
 };
 
+interface CollectionFile {
+  filename: string;
+  file_type?: string;
+  record_count: number;
+  uploaded_at?: string;
+  first_chunk_index?: number;
+  last_chunk_index?: number;
+}
+
+interface CollectionFilesData {
+  collection_name: string;
+  total_files: number;
+  total_records: number;
+  files: CollectionFile[];
+}
+
 export default function ImportPage() {
   const [parsedFiles, setParsedFiles] = useState<ParsedFile[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -53,11 +80,24 @@ export default function ImportPage() {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<Set<string>>(new Set());
+  const [selectedCollection, setSelectedCollection] = useState<string>("");
+  const [collectionFiles, setCollectionFiles] =
+    useState<CollectionFilesData | null>(null);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [deletingFile, setDeletingFile] = useState<string | null>(null);
 
   // Fetch collections on mount
   useEffect(() => {
     loadCollections();
   }, []);
+
+  useEffect(() => {
+    if (selectedCollection) {
+      loadCollectionFiles(selectedCollection);
+    } else {
+      setCollectionFiles(null);
+    }
+  }, [selectedCollection]);
 
   const loadCollections = useCallback(async () => {
     setIsLoadingCollections(true);
@@ -73,6 +113,64 @@ export default function ImportPage() {
       setIsLoadingCollections(false);
     }
   }, []);
+
+  const loadCollectionFiles = async (collectionName: string) => {
+    try {
+      setLoadingFiles(true);
+      const data = await apiClient.getCollectionFiles(collectionName);
+      setCollectionFiles(data);
+    } catch (error: any) {
+      console.error("Error loading collection files:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load collection files",
+        variant: "destructive",
+      });
+      setCollectionFiles(null);
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const handleDeleteFile = async (filename: string) => {
+    if (!selectedCollection) return;
+
+    // Confirm deletion
+    if (
+      !confirm(
+        `Are you sure you want to delete all records for "${filename}"? This action cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setDeletingFile(filename);
+      const result = await apiClient.deleteCollectionRecords(
+        selectedCollection,
+        {
+          filename: filename,
+        }
+      );
+
+      toast({
+        title: "Success",
+        description: `Deleted ${result.deleted} records for "${filename}"`,
+      });
+
+      // Reload file list
+      await loadCollectionFiles(selectedCollection);
+    } catch (error: any) {
+      console.error("Error deleting file:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete file records",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingFile(null);
+    }
+  };
 
   const handleCreateProfessional = useCallback(async () => {
     if (!newProfessionalName.trim()) {
@@ -647,6 +745,155 @@ export default function ImportPage() {
             })}
           </section>
         )}
+
+        {/* Collection Management */}
+        <Card className="mt-10">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Collection Management
+            </CardTitle>
+            <CardDescription>
+              View file statistics and records for each collection in your
+              knowledge base.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {collections.length === 0 ? (
+              <p className="text-sm text-gray-500">No collections found.</p>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="collection-select">Select Collection</Label>
+                  <div className="flex gap-2">
+                    <select
+                      id="collection-select"
+                      value={selectedCollection}
+                      onChange={(e) => setSelectedCollection(e.target.value)}
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black bg-white"
+                    >
+                      <option value="">Select a collection...</option>
+                      {collections.map((col) => (
+                        <option key={col.name} value={col.name}>
+                          {col.name}{" "}
+                          {col.count !== null && col.count !== undefined
+                            ? `(${col.count} docs)`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedCollection && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => loadCollectionFiles(selectedCollection)}
+                        disabled={loadingFiles}
+                      >
+                        <RefreshCw
+                          className={`h-4 w-4 ${loadingFiles ? "animate-spin" : ""}`}
+                        />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {loadingFiles && (
+                  <div className="text-center py-4 text-sm text-gray-500">
+                    Loading file statistics...
+                  </div>
+                )}
+
+                {collectionFiles && !loadingFiles && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                      <div>
+                        <div className="text-sm text-gray-600">Total Files</div>
+                        <div className="text-2xl font-bold text-black">
+                          {collectionFiles.total_files}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-600">
+                          Total Records
+                        </div>
+                        <div className="text-2xl font-bold text-black">
+                          {collectionFiles.total_records}
+                        </div>
+                      </div>
+                    </div>
+
+                    {collectionFiles.files.length > 0 ? (
+                      <div className="space-y-2">
+                        <Label>Files in Collection</Label>
+                        <div className="border border-gray-200 rounded-lg overflow-hidden">
+                          <div className="max-h-96 overflow-y-auto">
+                            <table className="w-full text-sm">
+                              <thead className="bg-gray-50 sticky top-0">
+                                <tr>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                                    Filename
+                                  </th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                                    Type
+                                  </th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                                    Records
+                                  </th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                                    Actions
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-200">
+                                {collectionFiles.files.map((file, idx) => (
+                                  <tr key={idx} className="hover:bg-gray-50">
+                                    <td className="px-4 py-2">
+                                      <div className="flex items-center gap-2">
+                                        <FileText className="h-4 w-4 text-gray-400" />
+                                        <span className="font-medium">
+                                          {file.filename}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-2 text-gray-600">
+                                      {file.file_type || "N/A"}
+                                    </td>
+                                    <td className="px-4 py-2 text-gray-600">
+                                      {file.record_count}
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() =>
+                                          handleDeleteFile(file.filename)
+                                        }
+                                        disabled={
+                                          deletingFile === file.filename
+                                        }
+                                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">
+                        No files found in this collection.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
       </main>
     </div>
   );

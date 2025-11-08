@@ -52,6 +52,40 @@ class ApiClient {
     return this.request<{ name: string; metadata?: Record<string, any>; count?: number }>(`/collections/${name}`);
   }
 
+  async getCollectionFiles(name: string) {
+    return this.request<{
+      collection_name: string;
+      total_files: number;
+      total_records: number;
+      files: Array<{
+        filename: string;
+        file_type?: string;
+        record_count: number;
+        uploaded_at?: string;
+        first_chunk_index?: number;
+        last_chunk_index?: number;
+      }>;
+    }>(`/collections/${name}/files`);
+  }
+
+  async deleteCollectionRecords(
+    collectionName: string,
+    options: {
+      filename?: string;
+      filenames?: string[];
+      where?: Record<string, any>;
+    }
+  ) {
+    return this.request<{
+      status: string;
+      deleted: number | string;
+      filter: Record<string, any>;
+    }>(`/collections/${collectionName}/delete`, {
+      method: "DELETE",
+      body: JSON.stringify(options),
+    });
+  }
+
   // Upsert documents
   async upsert(
     collectionName: string,

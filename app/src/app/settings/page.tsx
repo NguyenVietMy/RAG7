@@ -16,7 +16,6 @@ import DashboardNavbar from "@/components/dashboard-navbar";
 import { apiClient } from "@/lib/api-client";
 import { dbClient } from "@/lib/db-client";
 import { toast } from "@/components/ui/use-toast";
-
 interface RAGConfig {
   rag_n_results: number;
   rag_similarity_threshold: number;

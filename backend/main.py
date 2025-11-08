@@ -9,7 +9,7 @@ import traceback
 import logging
 from typing import List, Optional, Any
 from pydantic import BaseModel
-from embeddings import embed_texts
+from embeddings import embed_texts, clean_text_for_utf8
 from chat_service import ChatService
 
 # Set up logging
@@ -131,6 +131,94 @@ def get_collection(name: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/collections/{name}/files")
+def get_collection_files(name: str):
+    """
+    Get file statistics for a collection.
+    Returns count of unique files and records per file based on metadata.
+    """
+    try:
+        client = get_chroma_client()
+        col = client.get_collection(name=name)
+        
+        # Get all records with metadata
+        # ChromaDB's get() method can fetch all records when called without filters
+        # We'll fetch in batches to handle large collections
+        all_ids = []
+        all_metadatas = []
+        
+        # ChromaDB doesn't have a direct "get all" - we need to query or use peek
+        # Let's use peek with a large limit, or we can use get() with no where clause
+        try:
+            # Try to get all records - ChromaDB's get() without where should return all
+            result = col.get(include=["metadatas"])
+            all_metadatas = result.get("metadatas", []) or []
+            all_ids = result.get("ids", []) or []
+        except Exception as e:
+            logger.warning(f"Error fetching all records: {str(e)}, trying alternative method")
+            # Fallback: use peek with large limit
+            try:
+                result = col.peek(limit=100000)  # Large limit
+                all_metadatas = result.get("metadatas", []) or []
+                all_ids = result.get("ids", []) or []
+            except Exception as peek_error:
+                logger.error(f"Error with peek: {str(peek_error)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to fetch collection data: {str(peek_error)}"
+                )
+        
+        # Group by filename from metadata
+        file_stats = {}
+        total_records = len(all_ids)
+        
+        for i, metadata in enumerate(all_metadatas):
+            if not metadata:
+                continue
+            
+            filename = metadata.get("filename")
+            if not filename:
+                # Skip records without filename metadata
+                continue
+            
+            if filename not in file_stats:
+                file_stats[filename] = {
+                    "filename": filename,
+                    "file_type": metadata.get("file_type"),
+                    "record_count": 0,
+                    "uploaded_at": metadata.get("uploaded_at"),
+                    "first_chunk_index": metadata.get("chunk_index"),
+                    "last_chunk_index": metadata.get("chunk_index"),
+                }
+            
+            file_stats[filename]["record_count"] += 1
+            
+            # Track chunk index range
+            chunk_idx = metadata.get("chunk_index")
+            if chunk_idx is not None:
+                if file_stats[filename]["first_chunk_index"] is None or chunk_idx < file_stats[filename]["first_chunk_index"]:
+                    file_stats[filename]["first_chunk_index"] = chunk_idx
+                if file_stats[filename]["last_chunk_index"] is None or chunk_idx > file_stats[filename]["last_chunk_index"]:
+                    file_stats[filename]["last_chunk_index"] = chunk_idx
+        
+        # Convert to list and sort by filename
+        files_list = list(file_stats.values())
+        files_list.sort(key=lambda x: x["filename"])
+        
+        return {
+            "collection_name": name,
+            "total_files": len(files_list),
+            "total_records": total_records,
+            "files": files_list
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting collection files: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class UpsertBody(BaseModel):
     ids: List[str]
     documents: Optional[List[str]] = None  # if provided and no embeddings, we embed
@@ -176,6 +264,12 @@ def upsert(name: str, body: UpsertBody):
 
         vectors: Optional[List[List[float]]] = body.embeddings
         embedding_model_used = None
+        
+        # Clean documents to ensure valid UTF-8 (always clean if documents are provided)
+        cleaned_documents = None
+        if body.documents:
+            cleaned_documents = [clean_text_for_utf8(doc) for doc in body.documents]
+        
         if vectors is None:
             if not body.documents:
                 raise HTTPException(status_code=400, detail="Provide embeddings or documents to embed")
@@ -183,9 +277,9 @@ def upsert(name: str, body: UpsertBody):
             # Determine which embedding model to use
             embedding_model_used = body.model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
             
-            logger.info(f"Generating embeddings for {len(body.documents)} documents using model: {embedding_model_used}")
+            logger.info(f"Generating embeddings for {len(cleaned_documents)} documents using model: {embedding_model_used}")
             try:
-                vectors = embed_texts(body.documents, model=embedding_model_used)
+                vectors = embed_texts(cleaned_documents, model=embedding_model_used)
                 logger.info(f"Generated {len(vectors)} embeddings")
             except Exception as embed_error:
                 logger.error(f"Embedding error: {str(embed_error)}")
@@ -224,10 +318,11 @@ def upsert(name: str, body: UpsertBody):
             
             if ids_count <= CHROMADB_BATCH_SIZE:
                 # Single batch
+                # Use cleaned documents for storage (cleaned_documents is already None if no documents provided)
                 col.upsert(
                     ids=body.ids, 
                     embeddings=vectors, 
-                    documents=body.documents if body.documents else None,
+                    documents=cleaned_documents,
                     metadatas=formatted_metadatas
                 )
             else:
@@ -238,7 +333,7 @@ def upsert(name: str, body: UpsertBody):
                 for i in range(0, ids_count, CHROMADB_BATCH_SIZE):
                     batch_ids = body.ids[i:i + CHROMADB_BATCH_SIZE]
                     batch_vectors = vectors[i:i + CHROMADB_BATCH_SIZE]
-                    batch_documents = body.documents[i:i + CHROMADB_BATCH_SIZE] if body.documents else None
+                    batch_documents = cleaned_documents[i:i + CHROMADB_BATCH_SIZE] if body.documents else None
                     batch_metadatas = formatted_metadatas[i:i + CHROMADB_BATCH_SIZE] if formatted_metadatas else None
                     batch_num = (i // CHROMADB_BATCH_SIZE) + 1
                     
@@ -310,6 +405,83 @@ def query(name: str, body: QueryBody):
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeleteBody(BaseModel):
+    filename: Optional[str] = None  # Delete records matching this filename
+    filenames: Optional[List[str]] = None  # Delete records matching any of these filenames
+    where: Optional[dict] = None  # Custom where clause for advanced filtering
+
+
+@app.delete("/collections/{name}/delete")
+def delete_records(name: str, body: DeleteBody):
+    """
+    Delete records from a collection filtered by filename or custom where clause.
+    
+    You can specify:
+    - filename: Delete all records with this exact filename
+    - filenames: Delete all records matching any of these filenames
+    - where: Custom ChromaDB where clause for advanced filtering
+    
+    At least one of filename, filenames, or where must be provided.
+    """
+    try:
+        client = get_chroma_client()
+        col = client.get_collection(name=name)
+        
+        # Build where clause
+        where_clause = None
+        
+        if body.where:
+            # Use custom where clause if provided
+            where_clause = body.where
+        elif body.filenames:
+            # Multiple filenames: use $in operator
+            if len(body.filenames) == 1:
+                where_clause = {"filename": body.filenames[0]}
+            else:
+                where_clause = {"filename": {"$in": body.filenames}}
+        elif body.filename:
+            # Single filename
+            where_clause = {"filename": body.filename}
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Must provide filename, filenames, or where clause"
+            )
+        
+        # First, get count of records that will be deleted
+        try:
+            result = col.get(where=where_clause, include=["ids"])
+            records_to_delete = result.get("ids", []) or []
+            count_before = len(records_to_delete)
+        except Exception as e:
+            logger.warning(f"Could not get count before deletion: {str(e)}")
+            count_before = None
+        
+        # Perform deletion
+        try:
+            col.delete(where=where_clause)
+            logger.info(f"Deleted records from collection '{name}' with filter: {where_clause}")
+        except Exception as delete_error:
+            logger.error(f"ChromaDB delete error: {str(delete_error)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete records: {str(delete_error)}"
+            )
+        
+        return {
+            "status": "ok",
+            "deleted": count_before if count_before is not None else "unknown",
+            "filter": where_clause
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete error: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
