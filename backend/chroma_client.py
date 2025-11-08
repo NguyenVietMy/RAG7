@@ -37,7 +37,12 @@ def get_chroma_client() -> chromadb.ClientAPI:
         return chromadb.CloudClient(api_key=api_key, tenant=tenant, database=database)
     
     # Self-hosted mode (default) - connect to local Docker instance
+    # For self-hosted without auth, use empty settings
     return chromadb.HttpClient(
         host=chroma_host,
-        port=chroma_port
+        port=chroma_port,
+        settings=chromadb.Settings(
+            anonymized_telemetry=False,
+            allow_reset=True
+        )
     )

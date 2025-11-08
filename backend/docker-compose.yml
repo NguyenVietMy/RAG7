@@ -5,10 +5,10 @@ services:
     ports:
       - "8001:8000" # Host port 8001 -> Container port 8000 (backend uses 8000)
     volumes:
-      - C:/ChromaDB_record:/chroma/chroma # Persistent storage: Windows path -> container path
+      - C:/ChromaDB_record:/data # ChromaDB stores data in /data by default
     environment:
       - IS_PERSISTENT=TRUE
-      - PERSIST_DIRECTORY=/chroma/chroma
+      - PERSIST_DIRECTORY=/data
       - ANONYMIZED_TELEMETRY=FALSE
     restart: unless-stopped
     healthcheck:
