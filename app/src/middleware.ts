@@ -26,24 +26,7 @@ export async function middleware(req: NextRequest) {
     }
   )
 
-  // Refresh session if expired - required for Server Components
-  const { data: { session }, error } = await supabase.auth.getSession()
-
-  if (error) {
-    console.error('Auth session error:', error)
-  }
-
-  // Protected routes - redirect to sign-in if not authenticated
-  const protectedPaths = ['/dashboard', '/import', '/settings']
-  const isProtectedPath = protectedPaths.some(path => 
-    req.nextUrl.pathname === path || req.nextUrl.pathname.startsWith(path + '/')
-  )
-
-  if (isProtectedPath && (!session || error)) {
-    const redirectUrl = new URL('/sign-in', req.url)
-    return NextResponse.redirect(redirectUrl)
-  }
-
+  // No auth checks needed for local app
   return res
 }
 

@@ -98,13 +98,12 @@ class ApiClient {
     rag_n_results?: number;
     rag_similarity_threshold?: number;
     rag_max_context_tokens?: number;
-  }, userId?: string) {
-    const params = userId ? `?user_id=${userId}` : "";
+  }) {
     return this.request<{
       content: string;
       tokens_used?: number;
       model?: string;
-    }>(`/chat${params}`, {
+    }>(`/chat`, {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -120,26 +119,24 @@ class ApiClient {
   }
 
   // RAG Configuration endpoints
-  async getRAGConfig(userId?: string) {
-    const params = userId ? `?user_id=${userId}` : "";
+  async getRAGConfig() {
     return this.request<{
       rag_n_results: number;
       rag_similarity_threshold: number;
       rag_max_context_tokens: number;
-    }>(`/rag/config${params}`);
+    }>(`/rag/config`);
   }
 
   async updateRAGConfig(data: {
     rag_n_results?: number;
     rag_similarity_threshold?: number;
     rag_max_context_tokens?: number;
-  }, userId?: string) {
-    const params = userId ? `?user_id=${userId}` : "";
+  }) {
     return this.request<{
       rag_n_results: number;
       rag_similarity_threshold: number;
       rag_max_context_tokens: number;
-    }>(`/rag/config${params}`, {
+    }>(`/rag/config`, {
       method: "PUT",
       body: JSON.stringify(data),
     });

@@ -72,20 +72,10 @@ export default function ChatUI() {
     setIsLoadingChats(true);
     try {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setError("Please sign in to view chats");
-        setIsLoadingChats(false);
-        return;
-      }
 
       const { data, error: dbError } = await supabase
         .from("chats")
         .select("*")
-        .eq("user_id", user.id)
         .eq("is_archived", false)
         .order("last_message_at", { ascending: false })
         .limit(50); // Limit to recent chats
@@ -113,11 +103,6 @@ export default function ChatUI() {
   const loadMessages = async (chatId: string) => {
     try {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return;
 
       const { data, error: dbError } = await supabase
         .from("messages")
@@ -154,11 +139,6 @@ export default function ChatUI() {
   ): Promise<string | null> => {
     try {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return null;
 
       const { data, error: dbError } = await supabase
         .from("messages")
@@ -185,11 +165,6 @@ export default function ChatUI() {
       });
 
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return;
 
       await supabase
         .from("chats")
@@ -197,8 +172,7 @@ export default function ChatUI() {
           title: response.title,
           title_refined: true,
         })
-        .eq("id", chatId)
-        .eq("user_id", user.id);
+        .eq("id", chatId);
 
       // Update local state
       setChats((prevChats) =>
@@ -231,21 +205,12 @@ export default function ChatUI() {
 
     try {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setError("Please sign in to delete chats");
-        return;
-      }
 
       // Delete chat (CASCADE DELETE will automatically delete all messages)
       const { error: deleteError } = await supabase
         .from("chats")
         .delete()
-        .eq("id", chatId)
-        .eq("user_id", user.id);
+        .eq("id", chatId);
 
       if (deleteError) throw deleteError;
 
@@ -273,14 +238,6 @@ export default function ChatUI() {
 
     try {
       const supabaseClient = createClient();
-      const {
-        data: { user: currentUser },
-      } = await supabaseClient.auth.getUser();
-
-      if (!currentUser) {
-        setError("Please sign in to send messages");
-        return;
-      }
 
       // Create new chat if none is active
       let chatIdToUse = activeChatId;
@@ -291,7 +248,6 @@ export default function ChatUI() {
         const { data: newChat, error: chatError } = await supabaseClient
           .from("chats")
           .insert({
-            user_id: currentUser.id,
             title: initialTitle,
             collection_name: selectedCollection,
           })
@@ -356,13 +312,13 @@ export default function ChatUI() {
       const activeChatCollection =
         activeChat?.collection_name || selectedCollection;
 
-      // Load user's RAG config from Supabase
+      // Load RAG config from Supabase (single config for local app)
       let ragConfig = null;
       try {
         const { data: ragSettings, error: ragError } = await supabaseClient
-          .from("user_rag_settings")
+          .from("rag_settings")
           .select("*")
-          .eq("user_id", currentUser.id)
+          .limit(1)
           .single();
 
         if (!ragError && ragSettings) {
@@ -376,7 +332,7 @@ export default function ChatUI() {
         console.warn("Failed to load RAG config, using defaults:", err);
       }
 
-      // Call backend API (user ID already available from currentUser)
+      // Call backend API (no user ID needed for local app)
       // Pass RAG config explicitly to ensure it's used
       const response = await apiClient.chat(
         {
@@ -387,8 +343,7 @@ export default function ChatUI() {
             rag_similarity_threshold: ragConfig.rag_similarity_threshold,
             rag_max_context_tokens: ragConfig.rag_max_context_tokens,
           }),
-        },
-        currentUser.id
+        }
       );
 
       // Save assistant message

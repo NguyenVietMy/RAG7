@@ -47,9 +47,9 @@ def _get_supabase_key() -> Optional[str]:
     return key
 
 
-def get_user_rag_config(user_id: str) -> Optional[dict]:
+def get_rag_config() -> Optional[dict]:
     """
-    Get RAG configuration for a user from Supabase via HTTP API.
+    Get RAG configuration from Supabase via HTTP API (single config for local app).
     Returns None if settings don't exist or Supabase is not configured.
     """
     supabase_url = _get_supabase_url()
@@ -59,17 +59,15 @@ def get_user_rag_config(user_id: str) -> Optional[dict]:
         return None
     
     try:
-        # Supabase REST API: GET /rest/v1/user_rag_settings?user_id=eq.{user_id}
-        # PostgREST filter syntax: column=operator.value
-        url = f"{supabase_url}/rest/v1/user_rag_settings"
+        # Supabase REST API: GET /rest/v1/rag_settings (single config)
+        url = f"{supabase_url}/rest/v1/rag_settings"
         headers = {
             "apikey": supabase_key,
             "Authorization": f"Bearer {supabase_key}",
             "Content-Type": "application/json",
         }
-        # PostgREST filter: user_id=eq.{uuid}
-        # httpx will URL-encode this properly
-        params = {"user_id": f"eq.{user_id}"}
+        # Get first config (limit=1)
+        params = {"limit": "1"}
         
         with httpx.Client(timeout=10.0) as client:
             response = client.get(url, headers=headers, params=params)
@@ -78,22 +76,22 @@ def get_user_rag_config(user_id: str) -> Optional[dict]:
             data = response.json()
             if data and len(data) > 0:
                 settings = data[0]
-                logger.info(f"Retrieved RAG config for user {user_id}: rag_n_results={settings.get('rag_n_results')}, threshold={settings.get('rag_similarity_threshold')}, max_tokens={settings.get('rag_max_context_tokens')}")
+                logger.info(f"Retrieved RAG config: rag_n_results={settings.get('rag_n_results')}, threshold={settings.get('rag_similarity_threshold')}, max_tokens={settings.get('rag_max_context_tokens')}")
                 return {
                     "rag_n_results": settings.get("rag_n_results", 3),
                     "rag_similarity_threshold": float(settings.get("rag_similarity_threshold", 0.0)),
                     "rag_max_context_tokens": settings.get("rag_max_context_tokens", 2000),
                 }
-            logger.debug(f"No RAG config found for user {user_id}")
+            logger.debug("No RAG config found")
             return None
     except Exception as e:
         logger.warning(f"Error fetching RAG config from Supabase: {str(e)}")
         return None
 
 
-def upsert_user_rag_config(user_id: str, config: dict) -> bool:
+def upsert_rag_config(config: dict) -> bool:
     """
-    Create or update RAG configuration for a user in Supabase via HTTP API.
+    Create or update RAG configuration in Supabase via HTTP API (single config for local app).
     Returns True if successful, False otherwise.
     """
     supabase_url = _get_supabase_url()
@@ -104,25 +102,35 @@ def upsert_user_rag_config(user_id: str, config: dict) -> bool:
         return False
     
     try:
-        # Supabase REST API upsert: POST with Prefer: resolution=merge-duplicates
-        # The unique constraint on user_id allows this to work as upsert
-        url = f"{supabase_url}/rest/v1/user_rag_settings"
+        # Supabase REST API: First check if config exists, then update or insert
+        url = f"{supabase_url}/rest/v1/rag_settings"
         headers = {
             "apikey": supabase_key,
             "Authorization": f"Bearer {supabase_key}",
             "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates",
         }
         
-        payload = {
-            "user_id": user_id,
-            "rag_n_results": config.get("rag_n_results", 3),
-            "rag_similarity_threshold": config.get("rag_similarity_threshold", 0.0),
-            "rag_max_context_tokens": config.get("rag_max_context_tokens", 2000),
-        }
-        
+        # Check if config exists
         with httpx.Client(timeout=10.0) as client:
-            response = client.post(url, headers=headers, json=payload)
+            check_response = client.get(url, headers=headers, params={"limit": "1"})
+            check_response.raise_for_status()
+            existing = check_response.json()
+            
+            payload = {
+                "rag_n_results": config.get("rag_n_results", 3),
+                "rag_similarity_threshold": config.get("rag_similarity_threshold", 0.0),
+                "rag_max_context_tokens": config.get("rag_max_context_tokens", 2000),
+            }
+            
+            if existing and len(existing) > 0:
+                # Update existing
+                config_id = existing[0]["id"]
+                update_url = f"{url}?id=eq.{config_id}"
+                response = client.patch(update_url, headers=headers, json=payload)
+            else:
+                # Insert new
+                response = client.post(url, headers=headers, json=payload)
+            
             response.raise_for_status()
             return True
     except httpx.HTTPStatusError as e:

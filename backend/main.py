@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from chroma_client import get_chroma_client, MissingEnvironmentVariableError
-from rag_config import get_user_rag_config, upsert_user_rag_config
+from rag_config import get_rag_config, upsert_rag_config
 import os
 import traceback
 import logging
@@ -336,7 +336,7 @@ class ChatResponse(BaseModel):
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(body: ChatRequest, user_id: Optional[str] = None):
+def chat(body: ChatRequest):
     """Chat endpoint that uses OpenAI API with optional RAG from ChromaDB."""
     try:
         if not body.messages:
@@ -345,29 +345,28 @@ def chat(body: ChatRequest, user_id: Optional[str] = None):
         # Convert Pydantic models to dicts
         messages_dict = [{"role": msg.role, "content": msg.content} for msg in body.messages]
         
-        # Get user's RAG config from Supabase (or use defaults/request overrides)
-        user_rag_config = None
-        if user_id:
-            try:
-                user_rag_config = get_user_rag_config(user_id)
-                if user_rag_config:
-                    logger.info(f"Loaded RAG config for user {user_id}: {user_rag_config}")
-                else:
-                    logger.info(f"No RAG config found for user {user_id}, using defaults")
-            except Exception as e:
-                logger.warning(f"Error loading RAG config for user {user_id}: {str(e)}")
-                user_rag_config = None
+        # Get RAG config from Supabase (or use defaults/request overrides)
+        rag_config = None
+        try:
+            rag_config = get_rag_config()
+            if rag_config:
+                logger.info(f"Loaded RAG config: {rag_config}")
+            else:
+                logger.info("No RAG config found, using defaults")
+        except Exception as e:
+            logger.warning(f"Error loading RAG config: {str(e)}")
+            rag_config = None
         
-        # Use request overrides if provided, otherwise use user config, otherwise use defaults
+        # Use request overrides if provided, otherwise use config, otherwise use defaults
         defaults = {
             "rag_n_results": 3,
             "rag_similarity_threshold": 0.0,
             "rag_max_context_tokens": 2000
         }
         
-        rag_n_results = body.rag_n_results if body.rag_n_results is not None else (user_rag_config.get("rag_n_results") if user_rag_config else defaults["rag_n_results"])
-        rag_similarity_threshold = body.rag_similarity_threshold if body.rag_similarity_threshold is not None else (user_rag_config.get("rag_similarity_threshold") if user_rag_config else defaults["rag_similarity_threshold"])
-        rag_max_context_tokens = body.rag_max_context_tokens if body.rag_max_context_tokens is not None else (user_rag_config.get("rag_max_context_tokens") if user_rag_config else defaults["rag_max_context_tokens"])
+        rag_n_results = body.rag_n_results if body.rag_n_results is not None else (rag_config.get("rag_n_results") if rag_config else defaults["rag_n_results"])
+        rag_similarity_threshold = body.rag_similarity_threshold if body.rag_similarity_threshold is not None else (rag_config.get("rag_similarity_threshold") if rag_config else defaults["rag_similarity_threshold"])
+        rag_max_context_tokens = body.rag_max_context_tokens if body.rag_max_context_tokens is not None else (rag_config.get("rag_max_context_tokens") if rag_config else defaults["rag_max_context_tokens"])
         
         logger.info(f"Using RAG config: n_results={rag_n_results}, threshold={rag_similarity_threshold}, max_tokens={rag_max_context_tokens}")
         
@@ -439,10 +438,10 @@ class RAGConfigResponse(BaseModel):
 
 
 @app.get("/rag/config", response_model=RAGConfigResponse)
-def get_rag_config(user_id: Optional[str] = None):
+def get_rag_config_endpoint():
     """
-    Get RAG configuration for a user.
-    Returns default values if user_id not provided or settings don't exist.
+    Get RAG configuration (single config for local app).
+    Returns default values if settings don't exist.
     """
     defaults = {
         "rag_n_results": 3,
@@ -450,30 +449,24 @@ def get_rag_config(user_id: Optional[str] = None):
         "rag_max_context_tokens": 2000
     }
     
-    if not user_id:
-        return RAGConfigResponse(**defaults)
-    
     # Fetch from Supabase
-    user_config = get_user_rag_config(user_id)
-    if user_config:
-        return RAGConfigResponse(**user_config)
+    config = get_rag_config()
+    if config:
+        return RAGConfigResponse(**config)
     
     # Return defaults if not found or Supabase not configured
     return RAGConfigResponse(**defaults)
 
 
 @app.put("/rag/config", response_model=RAGConfigResponse)
-def update_rag_config(body: RAGConfigRequest, user_id: Optional[str] = None):
+def update_rag_config_endpoint(body: RAGConfigRequest):
     """
-    Update RAG configuration for a user.
+    Update RAG configuration (single config for local app).
     
     Note: This endpoint validates the config but doesn't save to Supabase.
     The frontend should save directly to Supabase using its own client.
     This endpoint just returns the validated config values.
     """
-    # Note: We don't require user_id here since frontend handles saving
-    # But we validate the config values and return them
-    
     # Validate input ranges
     if body.rag_n_results is not None:
         if body.rag_n_results < 1 or body.rag_n_results > 100:
@@ -496,10 +489,8 @@ def update_rag_config(body: RAGConfigRequest, user_id: Optional[str] = None):
                 detail="rag_max_context_tokens must be between 1 and 10000"
             )
     
-    # Get current config to merge with updates (optional, if user_id provided)
-    current_config = None
-    if user_id:
-        current_config = get_user_rag_config(user_id)
+    # Get current config to merge with updates
+    current_config = get_rag_config()
     
     defaults = {
         "rag_n_results": 3,

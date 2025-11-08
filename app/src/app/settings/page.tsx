@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +24,6 @@ interface RAGConfig {
 }
 
 export default function SettingsPage() {
-  const router = useRouter();
   const [config, setConfig] = useState<RAGConfig>({
     rag_n_results: 3,
     rag_similarity_threshold: 0.0,
@@ -33,23 +31,6 @@ export default function SettingsPage() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
-
-  // Auth guard - check if user is logged in
-  useEffect(() => {
-    const checkAuth = async () => {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        router.push("/sign-in");
-      }
-    };
-
-    checkAuth();
-  }, [router]);
 
   useEffect(() => {
     loadConfig();
@@ -59,38 +40,29 @@ export default function SettingsPage() {
     try {
       setLoading(true);
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
 
-      if (user) {
-        setUserId(user.id);
+      // Load from Supabase (single config for local app)
+      const { data, error } = await supabase
+        .from("rag_settings")
+        .select("*")
+        .limit(1)
+        .single();
 
-        // Load from Supabase directly (same way we load chats/messages)
-        const { data, error } = await supabase
-          .from("user_rag_settings")
-          .select("*")
-          .eq("user_id", user.id)
-          .single();
+      if (error && error.code !== "PGRST116") {
+        // PGRST116 = no rows returned, use defaults
+        const defaultConfig = await apiClient.getRAGConfig();
+        setConfig(defaultConfig);
+        return;
+      }
 
-        if (error && error.code !== "PGRST116") {
-          // PGRST116 = no rows returned
-          throw error;
-        }
-
-        if (data) {
-          setConfig({
-            rag_n_results: data.rag_n_results,
-            rag_similarity_threshold: data.rag_similarity_threshold,
-            rag_max_context_tokens: data.rag_max_context_tokens,
-          });
-        } else {
-          // No config found, use defaults
-          const defaultConfig = await apiClient.getRAGConfig(user.id);
-          setConfig(defaultConfig);
-        }
+      if (data) {
+        setConfig({
+          rag_n_results: data.rag_n_results,
+          rag_similarity_threshold: data.rag_similarity_threshold,
+          rag_max_context_tokens: data.rag_max_context_tokens,
+        });
       } else {
-        // Load defaults if not logged in
+        // No config found, use defaults
         const defaultConfig = await apiClient.getRAGConfig();
         setConfig(defaultConfig);
       }
@@ -110,34 +82,42 @@ export default function SettingsPage() {
     try {
       setSaving(true);
 
-      if (!userId) {
-        toast({
-          title: "Error",
-          description: "Please sign in to save configuration",
-          variant: "destructive",
-        });
-        return;
-      }
-
       // Validate config via backend (optional, but good for validation)
-      const validatedConfig = await apiClient.updateRAGConfig(config, userId);
+      const validatedConfig = await apiClient.updateRAGConfig(config);
 
-      // Save directly to Supabase (same way we save chats/messages)
-      // Use upsert with onConflict to handle both insert and update
+      // Save directly to Supabase (single config for local app)
       const supabase = createClient();
-      const { error } = await supabase.from("user_rag_settings").upsert(
-        {
-          user_id: userId,
+      
+      // Get existing config or create new one
+      const { data: existing } = await supabase
+        .from("rag_settings")
+        .select("id")
+        .limit(1)
+        .single();
+
+      if (existing) {
+        // Update existing
+        const { error } = await supabase
+          .from("rag_settings")
+          .update({
+            rag_n_results: validatedConfig.rag_n_results,
+            rag_similarity_threshold: validatedConfig.rag_similarity_threshold,
+            rag_max_context_tokens: validatedConfig.rag_max_context_tokens,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+
+        if (error) throw error;
+      } else {
+        // Insert new
+        const { error } = await supabase.from("rag_settings").insert({
           rag_n_results: validatedConfig.rag_n_results,
           rag_similarity_threshold: validatedConfig.rag_similarity_threshold,
           rag_max_context_tokens: validatedConfig.rag_max_context_tokens,
-        },
-        {
-          onConflict: "user_id", // Use the unique constraint
-        }
-      );
+        });
 
-      if (error) throw error;
+        if (error) throw error;
+      }
 
       toast({
         title: "Success",

@@ -5,12 +5,9 @@ import Image from "next/image";
 import { Button } from "./ui/button";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import { usePathname } from "next/navigation";
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const pathname = usePathname();
-  const isAuthPage = pathname === "/sign-in" || pathname === "/sign-up";
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0F172A]/95 backdrop-blur-sm border-b border-white/10">
@@ -27,59 +24,47 @@ export default function Navbar() {
           </Link>
 
           {/* Desktop Navigation */}
-          {!isAuthPage && (
-            <div className="hidden md:flex items-center gap-8">
-              <Link
-                href="#home"
-                className="text-gray-300 hover:text-white transition-colors"
-              >
-                Home
-              </Link>
-              <Link
-                href="#features"
-                className="text-gray-300 hover:text-white transition-colors"
-              >
-                Features
-              </Link>
-              <Link
-                href="#how-it-works"
-                className="text-gray-300 hover:text-white transition-colors"
-              >
-                How Lola Works
-              </Link>
-              <Link href="/sign-in">
-                <Button
-                  variant="ghost"
-                  className="text-gray-300 hover:text-white hover:bg-white/10"
-                >
-                  Login
-                </Button>
-              </Link>
-              <Link href="/sign-up">
-                <Button className="bg-[#3B82F6] hover:bg-[#2563EB] text-white">
-                  Get Started
-                </Button>
-              </Link>
-            </div>
-          )}
+          <div className="hidden md:flex items-center gap-8">
+            <Link
+              href="#home"
+              className="text-gray-300 hover:text-white transition-colors"
+            >
+              Home
+            </Link>
+            <Link
+              href="#features"
+              className="text-gray-300 hover:text-white transition-colors"
+            >
+              Features
+            </Link>
+            <Link
+              href="#how-it-works"
+              className="text-gray-300 hover:text-white transition-colors"
+            >
+              How Lola Works
+            </Link>
+            <Link href="/dashboard">
+              <Button className="bg-[#3B82F6] hover:bg-[#2563EB] text-white">
+                Get Started
+              </Button>
+            </Link>
+          </div>
 
           {/* Mobile Menu Button */}
-          {!isAuthPage && (
-            <button
-              className="md:hidden text-white"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            >
-              {mobileMenuOpen ? (
-                <X className="w-6 h-6" />
-              ) : (
-                <Menu className="w-6 h-6" />
-              )}
-            </button>
-          )}
+          <button
+            className="md:hidden text-white"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          >
+            {mobileMenuOpen ? (
+              <X className="w-6 h-6" />
+            ) : (
+              <Menu className="w-6 h-6" />
+            )}
+          </button>
         </div>
 
         {/* Mobile Menu */}
-        {!isAuthPage && mobileMenuOpen && (
+        {mobileMenuOpen && (
           <div className="md:hidden mt-4 pb-4 flex flex-col gap-4">
             <Link
               href="#home"
@@ -105,15 +90,7 @@ export default function Navbar() {
             >
               Import
             </Link>
-            <Link href="/sign-in">
-              <Button
-                variant="ghost"
-                className="w-full text-gray-300 hover:text-white hover:bg-white/10"
-              >
-                Login
-              </Button>
-            </Link>
-            <Link href="/sign-up">
+            <Link href="/dashboard">
               <Button className="w-full bg-[#3B82F6] hover:bg-[#2563EB] text-white">
                 Get Started
               </Button>
