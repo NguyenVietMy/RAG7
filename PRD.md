@@ -2,7 +2,7 @@
 
 ## Product Name
 
-**MindForge**
+**Lola**
 
 > “Forge your own AI Decision Support System.”
 
@@ -10,12 +10,12 @@
 
 ## 1. Overview
 
-**MindForge** is a web application that enables users to **create their own AI Decision Support Systems (DSS)** — functional, chat-based tools that analyze and reason over user-provided documents.
+**Lola** is a web application that enables users to **create their own AI Decision Support Systems (DSS)** — functional, chat-based tools that analyze and reason over user-provided documents.
 
 Users upload files (PDFs, DOCX, TXT, Markdown, or YouTube URLs) to instantly generate a **custom RAG-powered agent**.  
 Each agent (“Professional”) can process information, recall key details, and assist decision-making through a **chat interface** with contextual memory and citations.
 
-MindForge focuses on functionality, accuracy, and reasoning — not personality.  
+Lola focuses on functionality, accuracy, and reasoning — not personality.  
 Each “Professional” is a domain-specific expert built purely from user data.
 
 ---
