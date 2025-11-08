@@ -9,6 +9,7 @@ import logging
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from embeddings import embed_texts
+from chat_service import ChatService
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -264,4 +265,83 @@ def query(name: str, body: QueryBody):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== Chat endpoints =====
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    collection_name: Optional[str] = None  # Optional: for RAG
+    stream: bool = False
+
+
+class ChatResponse(BaseModel):
+    content: str
+    tokens_used: Optional[int] = None
+    model: Optional[str] = None
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(body: ChatRequest):
+    """Chat endpoint that uses OpenAI API with optional RAG from ChromaDB."""
+    try:
+        if not body.messages:
+            raise HTTPException(status_code=400, detail="Messages list cannot be empty")
+        
+        # Convert Pydantic models to dicts
+        messages_dict = [{"role": msg.role, "content": msg.content} for msg in body.messages]
+        
+        # Initialize chat service
+        chat_service = ChatService()
+        
+        try:
+            # Generate response
+            result = chat_service.chat(
+                messages=messages_dict,
+                collection_name=body.collection_name,
+                stream=body.stream
+            )
+            
+            return ChatResponse(
+                content=result["content"],
+                tokens_used=result.get("tokens_used"),
+                model=result.get("model")
+            )
+        finally:
+            chat_service.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat error: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
+
+
+class TitleRequest(BaseModel):
+    user_message: str
+
+
+class TitleResponse(BaseModel):
+    title: str
+
+
+@app.post("/chat/generate-title", response_model=TitleResponse)
+def generate_title(body: TitleRequest):
+    """Generate a chat title based on the user's prompt."""
+    try:
+        chat_service = ChatService()
+        try:
+            title = chat_service.generate_title(body.user_message)
+            return TitleResponse(title=title)
+        finally:
+            chat_service.close()
+    except Exception as e:
+        logger.error(f"Title generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Title generation error: {str(e)}")
 

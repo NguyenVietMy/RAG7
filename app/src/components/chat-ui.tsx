@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { Pencil, Search, Send, Plus } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Pencil, Search, Send, Plus, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
+import { apiClient } from "@/lib/api-client";
+import { createClient } from "../../supabase/client";
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  created_at?: string;
 };
 
 type Chat = {
@@ -15,123 +18,358 @@ type Chat = {
   title: string;
   messages: ChatMessage[];
   createdAt: Date;
+  collection_name?: string | null;
+  message_count?: number;
 };
 
 export default function ChatUI() {
-  const [chats, setChats] = useState<Chat[]>([
-    {
-      id: "1",
-      title: "Giải thích chi tiết quà tặng",
-      messages: [],
-      createdAt: new Date(),
-    },
-    {
-      id: "2",
-      title: "Str vs repr in Python",
-      messages: [],
-      createdAt: new Date(),
-    },
-    {
-      id: "3",
-      title: "Code refinement suggestions",
-      messages: [],
-      createdAt: new Date(),
-    },
-    {
-      id: "4",
-      title: "Connect ELRS to Arduino",
-      messages: [],
-      createdAt: new Date(),
-    },
-    {
-      id: "5",
-      title: "Using Chroma DB",
-      messages: [],
-      createdAt: new Date(),
-    },
-  ]);
+  const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingChats, setIsLoadingChats] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(
+    null
+  );
+  const [collections, setCollections] = useState<
+    Array<{ name: string; count?: number }>
+  >([]);
 
   const activeChat = chats.find((chat) => chat.id === activeChatId);
   const filteredChats = chats.filter((chat) =>
     chat.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleNewChat = () => {
-    const newChat: Chat = {
-      id: Date.now().toString(),
-      title: "New chat",
-      messages: [],
-      createdAt: new Date(),
-    };
-    setChats([newChat, ...chats]);
-    setActiveChatId(newChat.id);
-    setInputValue("");
+  // Load chats from database on mount
+  useEffect(() => {
+    loadChats();
+    loadCollections();
+  }, []);
+
+  // Load messages when active chat changes
+  useEffect(() => {
+    if (activeChatId) {
+      loadMessages(activeChatId);
+    }
+  }, [activeChatId]);
+
+  const loadCollections = async () => {
+    try {
+      const response = await apiClient.listCollections();
+      setCollections(response.collections || []);
+      // Auto-select first collection if available
+      if (response.collections && response.collections.length > 0) {
+        setSelectedCollection(response.collections[0].name);
+      }
+    } catch (err: any) {
+      console.error("Failed to load collections:", err);
+    }
   };
 
-  const handleSendMessage = () => {
-    if (!inputValue.trim()) return;
+  const loadChats = async () => {
+    setIsLoadingChats(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    // Create new chat if none is active
-    let chatIdToUse = activeChatId;
-    if (!activeChatId) {
-      const newChat: Chat = {
-        id: Date.now().toString(),
-        title: inputValue.substring(0, 50) || "New chat",
-        messages: [],
-        createdAt: new Date(),
-      };
-      setChats([newChat, ...chats]);
-      setActiveChatId(newChat.id);
-      chatIdToUse = newChat.id;
+      if (!user) {
+        setError("Please sign in to view chats");
+        setIsLoadingChats(false);
+        return;
+      }
+
+      const { data, error: dbError } = await supabase
+        .from("chats")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("is_archived", false)
+        .order("last_message_at", { ascending: false })
+        .limit(50); // Limit to recent chats
+
+      if (dbError) throw dbError;
+
+      const loadedChats: Chat[] = (data || []).map((chat) => ({
+        id: chat.id,
+        title: chat.title,
+        messages: [], // Load messages separately
+        createdAt: new Date(chat.created_at),
+        collection_name: chat.collection_name,
+        message_count: chat.message_count || 0,
+      }));
+
+      setChats(loadedChats);
+    } catch (err: any) {
+      console.error("Failed to load chats:", err);
+      setError(err?.message || "Failed to load chats");
+    } finally {
+      setIsLoadingChats(false);
     }
+  };
 
-    const message: ChatMessage = {
-      id: Date.now().toString(),
-      role: "user",
-      content: inputValue,
-    };
+  const loadMessages = async (chatId: string) => {
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    setChats((prevChats) =>
-      prevChats.map((chat) =>
-        chat.id === chatIdToUse
-          ? {
-              ...chat,
-              messages: [...chat.messages, message],
-              title:
-                chat.messages.length === 0 && chat.title === "New chat"
-                  ? inputValue.substring(0, 50)
-                  : chat.title,
-            }
-          : chat
-      )
-    );
+      if (!user) return;
 
+      const { data, error: dbError } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("chat_id", chatId)
+        .order("created_at", { ascending: true })
+        .limit(100); // Load last 100 messages
+
+      if (dbError) throw dbError;
+
+      const messages: ChatMessage[] = (data || []).map((msg) => ({
+        id: msg.id,
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+        created_at: msg.created_at,
+      }));
+
+      // Update chat with loaded messages
+      setChats((prevChats) =>
+        prevChats.map((chat) =>
+          chat.id === chatId ? { ...chat, messages } : chat
+        )
+      );
+    } catch (err: any) {
+      console.error("Failed to load messages:", err);
+      setError(err?.message || "Failed to load messages");
+    }
+  };
+
+  const saveMessage = async (
+    chatId: string,
+    role: "user" | "assistant",
+    content: string
+  ): Promise<string | null> => {
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return null;
+
+      const { data, error: dbError } = await supabase
+        .from("messages")
+        .insert({
+          chat_id: chatId,
+          role,
+          content,
+        })
+        .select()
+        .single();
+
+      if (dbError) throw dbError;
+      return data?.id || null;
+    } catch (err: any) {
+      console.error("Failed to save message:", err);
+      return null;
+    }
+  };
+
+  const generateTitleAsync = async (chatId: string, userMessage: string) => {
+    try {
+      const response = await apiClient.generateTitle({
+        user_message: userMessage,
+      });
+
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      await supabase
+        .from("chats")
+        .update({
+          title: response.title,
+          title_refined: true,
+        })
+        .eq("id", chatId)
+        .eq("user_id", user.id);
+
+      // Update local state
+      setChats((prevChats) =>
+        prevChats.map((chat) =>
+          chat.id === chatId ? { ...chat, title: response.title } : chat
+        )
+      );
+    } catch (err: any) {
+      console.error("Failed to generate title:", err);
+      // Don't show error to user, title generation is optional
+    }
+  };
+
+  const handleNewChat = () => {
+    setActiveChatId(null);
     setInputValue("");
+    setError(null);
+  };
 
-    // Simulate assistant response
-    setTimeout(() => {
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content:
-          "This is a placeholder response. The AI assistant functionality will be implemented separately.",
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isLoading) return;
+
+    const userMessage = inputValue.trim();
+    setInputValue("");
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setError("Please sign in to send messages");
+        return;
+      }
+
+      // Create new chat if none is active
+      let chatIdToUse = activeChatId;
+      let isNewChat = false;
+
+      if (!chatIdToUse) {
+        const initialTitle = userMessage.substring(0, 50) || "New chat";
+        const { data: newChat, error: chatError } = await supabase
+          .from("chats")
+          .insert({
+            user_id: user.id,
+            title: initialTitle,
+            collection_name: selectedCollection,
+          })
+          .select()
+          .single();
+
+        if (chatError) throw chatError;
+        chatIdToUse = newChat.id;
+        isNewChat = true;
+
+        // Add to local state
+        const newChatLocal: Chat = {
+          id: newChat.id,
+          title: initialTitle,
+          messages: [],
+          createdAt: new Date(newChat.created_at),
+          collection_name: selectedCollection,
+        };
+        setChats([newChatLocal, ...chats]);
+        setActiveChatId(newChat.id);
+      }
+
+      // Save user message
+      const userMessageId = await saveMessage(
+        chatIdToUse!,
+        "user",
+        userMessage
+      );
+      if (!userMessageId) {
+        throw new Error("Failed to save user message");
+      }
+
+      // Add user message to UI optimistically
+      const userMessageObj: ChatMessage = {
+        id: userMessageId,
+        role: "user",
+        content: userMessage,
       };
 
       setChats((prevChats) =>
         prevChats.map((chat) =>
           chat.id === chatIdToUse
-            ? { ...chat, messages: [...chat.messages, assistantMessage] }
+            ? {
+                ...chat,
+                messages: [...chat.messages, userMessageObj],
+              }
             : chat
         )
       );
-    }, 500);
+
+      // Get all messages for context (including the one we just added)
+      const currentChat = chats.find((c) => c.id === chatIdToUse);
+      const allMessages = [...(currentChat?.messages || []), userMessageObj];
+
+      // Prepare messages for API
+      const apiMessages = allMessages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      // Get active chat's collection name
+      const activeChatCollection =
+        activeChat?.collection_name || selectedCollection;
+
+      // Call backend API
+      const response = await apiClient.chat({
+        messages: apiMessages,
+        collection_name: activeChatCollection || undefined,
+      });
+
+      // Save assistant message
+      const assistantMessageId = await saveMessage(
+        chatIdToUse!,
+        "assistant",
+        response.content
+      );
+
+      const assistantMessageObj: ChatMessage = {
+        id: assistantMessageId || Date.now().toString(),
+        role: "assistant",
+        content: response.content,
+      };
+
+      // Update UI with assistant response
+      setChats((prevChats) =>
+        prevChats.map((chat) =>
+          chat.id === chatIdToUse
+            ? {
+                ...chat,
+                messages: [...chat.messages, assistantMessageObj],
+              }
+            : chat
+        )
+      );
+
+      // Generate title asynchronously if this is a new chat
+      if (isNewChat && allMessages.length === 1) {
+        // Generate title based on user's prompt only
+        generateTitleAsync(chatIdToUse!, userMessage).catch(console.error);
+      }
+    } catch (err: any) {
+      console.error("Error sending message:", err);
+      setError(err?.message || "Failed to send message. Please try again.");
+      // Remove optimistic user message on error
+      if (activeChatId) {
+        setChats((prevChats) =>
+          prevChats.map((chat) =>
+            chat.id === activeChatId
+              ? {
+                  ...chat,
+                  messages: chat.messages.slice(0, -1),
+                }
+              : chat
+          )
+        );
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !isLoading) {
       e.preventDefault();
       handleSendMessage();
     }
@@ -153,6 +391,27 @@ export default function ChatUI() {
           </Button>
         </div>
 
+        {/* Collection Selector */}
+        {collections.length > 0 && (
+          <div className="p-3 border-b border-gray-200">
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Knowledge Base
+            </label>
+            <select
+              value={selectedCollection || ""}
+              onChange={(e) => setSelectedCollection(e.target.value || null)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black bg-white"
+            >
+              <option value="">None</option>
+              {collections.map((col) => (
+                <option key={col.name} value={col.name}>
+                  {col.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Search Chats */}
         <div className="p-3 border-b border-gray-200">
           <div className="relative">
@@ -173,32 +432,52 @@ export default function ChatUI() {
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 px-2">
               Chats
             </h2>
-            <div className="space-y-1">
-              {filteredChats.map((chat) => (
-                <button
-                  key={chat.id}
-                  onClick={() => setActiveChatId(chat.id)}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                    activeChatId === chat.id
-                      ? "bg-gray-100 text-black font-medium"
-                      : "text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  <div className="truncate">{chat.title}</div>
-                </button>
-              ))}
-              {filteredChats.length === 0 && (
-                <div className="px-3 py-2 text-sm text-gray-400">
-                  No chats found
-                </div>
-              )}
-            </div>
+            {isLoadingChats ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {filteredChats.map((chat) => (
+                  <button
+                    key={chat.id}
+                    onClick={() => setActiveChatId(chat.id)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                      activeChatId === chat.id
+                        ? "bg-gray-100 text-black font-medium"
+                        : "text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="truncate">{chat.title}</div>
+                    {chat.message_count && chat.message_count > 0 && (
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {chat.message_count} messages
+                      </div>
+                    )}
+                  </button>
+                ))}
+                {filteredChats.length === 0 && !isLoadingChats && (
+                  <div className="px-3 py-2 text-sm text-gray-400">
+                    No chats found
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </aside>
 
       {/* Main Chat Area */}
       <main className="flex-1 flex flex-col bg-white">
+        {error && (
+          <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-red-700 text-sm">
+            {error}
+            <button onClick={() => setError(null)} className="ml-2 underline">
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {!activeChat ? (
           // Empty State - Initial Prompt
           <div className="flex-1 flex items-center justify-center">
@@ -213,7 +492,8 @@ export default function ChatUI() {
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyPress}
                     placeholder="Ask anything"
-                    className="w-full px-4 py-3 pr-12 rounded-3xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    disabled={isLoading}
+                    className="w-full px-4 py-3 pr-12 rounded-3xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:opacity-50"
                     rows={1}
                     style={{
                       minHeight: "52px",
@@ -228,11 +508,15 @@ export default function ChatUI() {
                   <div className="absolute right-3 top-[calc(50%-1px)] transform -translate-y-1/2 flex items-center gap-2">
                     <Button
                       onClick={handleSendMessage}
-                      disabled={!inputValue.trim()}
+                      disabled={!inputValue.trim() || isLoading}
                       className="h-8 w-8 p-0 rounded-full bg-transparent hover:bg-gray-100 text-gray-600 hover:text-gray-800 disabled:opacity-50"
                       variant="ghost"
                     >
-                      <Send className="h-4 w-4" />
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -245,26 +529,41 @@ export default function ChatUI() {
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto px-4 py-6">
               <div className="max-w-3xl mx-auto space-y-6">
-                {activeChat.messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${
-                      message.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
+                {activeChat.messages.length === 0 ? (
+                  <div className="text-center text-gray-400 py-12">
+                    Start a conversation...
+                  </div>
+                ) : (
+                  activeChat.messages.map((message) => (
                     <div
-                      className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                      key={message.id}
+                      className={`flex ${
                         message.role === "user"
-                          ? "bg-blue-600 text-white"
-                          : "bg-gray-100 text-gray-800"
+                          ? "justify-end"
+                          : "justify-start"
                       }`}
                     >
-                      <div className="whitespace-pre-wrap text-sm">
-                        {message.content}
+                      <div
+                        className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                          message.role === "user"
+                            ? "bg-blue-600 text-white"
+                            : "bg-gray-100 text-gray-800"
+                        }`}
+                      >
+                        <div className="whitespace-pre-wrap text-sm">
+                          {message.content}
+                        </div>
                       </div>
                     </div>
+                  ))
+                )}
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-100 text-gray-800 rounded-2xl px-4 py-3">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    </div>
                   </div>
-                ))}
+                )}
               </div>
             </div>
 
@@ -278,7 +577,8 @@ export default function ChatUI() {
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyPress}
                     placeholder="Ask anything"
-                    className="w-full pl-12 pr-12 py-3 rounded-3xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    disabled={isLoading}
+                    className="w-full pl-12 pr-12 py-3 rounded-3xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:opacity-50"
                     rows={1}
                     style={{
                       minHeight: "52px",
@@ -293,11 +593,15 @@ export default function ChatUI() {
                   <div className="absolute right-3 top-[calc(50%-1px)] transform -translate-y-1/2 flex items-center gap-2">
                     <Button
                       onClick={handleSendMessage}
-                      disabled={!inputValue.trim()}
+                      disabled={!inputValue.trim() || isLoading}
                       className="h-8 w-8 p-0 rounded-full bg-transparent hover:bg-gray-100 text-gray-600 hover:text-gray-800 disabled:opacity-50"
                       variant="ghost"
                     >
-                      <Send className="h-4 w-4" />
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
                     </Button>
                   </div>
                 </div>

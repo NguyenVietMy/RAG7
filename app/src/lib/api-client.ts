@@ -89,6 +89,31 @@ class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  // Chat endpoints
+  async chat(data: {
+    messages: Array<{ role: string; content: string }>;
+    collection_name?: string;
+    stream?: boolean;
+  }) {
+    return this.request<{
+      content: string;
+      tokens_used?: number;
+      model?: string;
+    }>("/chat", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async generateTitle(data: {
+    user_message: string;
+  }) {
+    return this.request<{ title: string }>("/chat/generate-title", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
