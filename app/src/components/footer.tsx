@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Twitter, Linkedin, Github, Mail } from "lucide-react";
 
 export default function Footer() {
@@ -10,8 +11,14 @@ export default function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
           {/* Brand Column */}
           <div className="col-span-2 md:col-span-1">
-            <Link href="/" className="text-2xl font-bold text-white mb-4 block">
-              Lola
+            <Link href="/" className="mb-4 block">
+              <Image
+                src="/Lola_logo.png"
+                alt="Lola"
+                width={120}
+                height={40}
+                className="h-10 w-auto"
+              />
             </Link>
             <p className="text-gray-400 text-sm leading-relaxed mb-4">
               Transform your documents into intelligent AI decision support

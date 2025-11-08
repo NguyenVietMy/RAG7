@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "./ui/button";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
@@ -12,8 +13,14 @@ export default function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0F172A]/95 backdrop-blur-sm border-b border-white/10">
       <div className="container mx-auto px-4 py-4">
         <div className="flex justify-between items-center">
-          <Link href="/" className="text-2xl font-bold text-white">
-            Lola
+          <Link href="/" className="flex items-center">
+            <Image
+              src="/Lola_logo.png"
+              alt="Lola"
+              width={180}
+              height={60}
+              className="h-16 w-auto"
+            />
           </Link>
 
           {/* Desktop Navigation */}
