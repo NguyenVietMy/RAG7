@@ -95,12 +95,16 @@ class ApiClient {
     messages: Array<{ role: string; content: string }>;
     collection_name?: string;
     stream?: boolean;
-  }) {
+    rag_n_results?: number;
+    rag_similarity_threshold?: number;
+    rag_max_context_tokens?: number;
+  }, userId?: string) {
+    const params = userId ? `?user_id=${userId}` : "";
     return this.request<{
       content: string;
       tokens_used?: number;
       model?: string;
-    }>("/chat", {
+    }>(`/chat${params}`, {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -111,6 +115,32 @@ class ApiClient {
   }) {
     return this.request<{ title: string }>("/chat/generate-title", {
       method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // RAG Configuration endpoints
+  async getRAGConfig(userId?: string) {
+    const params = userId ? `?user_id=${userId}` : "";
+    return this.request<{
+      rag_n_results: number;
+      rag_similarity_threshold: number;
+      rag_max_context_tokens: number;
+    }>(`/rag/config${params}`);
+  }
+
+  async updateRAGConfig(data: {
+    rag_n_results?: number;
+    rag_similarity_threshold?: number;
+    rag_max_context_tokens?: number;
+  }, userId?: string) {
+    const params = userId ? `?user_id=${userId}` : "";
+    return this.request<{
+      rag_n_results: number;
+      rag_similarity_threshold: number;
+      rag_max_context_tokens: number;
+    }>(`/rag/config${params}`, {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }

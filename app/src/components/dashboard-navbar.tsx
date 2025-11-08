@@ -43,6 +43,12 @@ export default function DashboardNavbar() {
           >
             Import
           </Link>
+          <Link
+            href="/settings"
+            className="text-sm text-gray-600 hover:text-gray-900"
+          >
+            Settings
+          </Link>
         </div>
         <div className="flex gap-4 items-center">
           <DropdownMenu>

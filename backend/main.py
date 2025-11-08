@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from chroma_client import get_chroma_client, MissingEnvironmentVariableError
+from rag_config import get_user_rag_config, upsert_user_rag_config
 import os
 import traceback
 import logging
@@ -323,6 +324,9 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     collection_name: Optional[str] = None  # Optional: for RAG
     stream: bool = False
+    rag_n_results: Optional[int] = None  # Override user's RAG config
+    rag_similarity_threshold: Optional[float] = None
+    rag_max_context_tokens: Optional[int] = None
 
 
 class ChatResponse(BaseModel):
@@ -332,7 +336,7 @@ class ChatResponse(BaseModel):
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(body: ChatRequest):
+def chat(body: ChatRequest, user_id: Optional[str] = None):
     """Chat endpoint that uses OpenAI API with optional RAG from ChromaDB."""
     try:
         if not body.messages:
@@ -340,6 +344,32 @@ def chat(body: ChatRequest):
         
         # Convert Pydantic models to dicts
         messages_dict = [{"role": msg.role, "content": msg.content} for msg in body.messages]
+        
+        # Get user's RAG config from Supabase (or use defaults/request overrides)
+        user_rag_config = None
+        if user_id:
+            try:
+                user_rag_config = get_user_rag_config(user_id)
+                if user_rag_config:
+                    logger.info(f"Loaded RAG config for user {user_id}: {user_rag_config}")
+                else:
+                    logger.info(f"No RAG config found for user {user_id}, using defaults")
+            except Exception as e:
+                logger.warning(f"Error loading RAG config for user {user_id}: {str(e)}")
+                user_rag_config = None
+        
+        # Use request overrides if provided, otherwise use user config, otherwise use defaults
+        defaults = {
+            "rag_n_results": 3,
+            "rag_similarity_threshold": 0.0,
+            "rag_max_context_tokens": 2000
+        }
+        
+        rag_n_results = body.rag_n_results if body.rag_n_results is not None else (user_rag_config.get("rag_n_results") if user_rag_config else defaults["rag_n_results"])
+        rag_similarity_threshold = body.rag_similarity_threshold if body.rag_similarity_threshold is not None else (user_rag_config.get("rag_similarity_threshold") if user_rag_config else defaults["rag_similarity_threshold"])
+        rag_max_context_tokens = body.rag_max_context_tokens if body.rag_max_context_tokens is not None else (user_rag_config.get("rag_max_context_tokens") if user_rag_config else defaults["rag_max_context_tokens"])
+        
+        logger.info(f"Using RAG config: n_results={rag_n_results}, threshold={rag_similarity_threshold}, max_tokens={rag_max_context_tokens}")
         
         # Initialize chat service
         chat_service = ChatService()
@@ -349,7 +379,10 @@ def chat(body: ChatRequest):
             result = chat_service.chat(
                 messages=messages_dict,
                 collection_name=body.collection_name,
-                stream=body.stream
+                stream=body.stream,
+                rag_n_results=rag_n_results,
+                rag_similarity_threshold=rag_similarity_threshold,
+                rag_max_context_tokens=rag_max_context_tokens
             )
             
             return ChatResponse(
@@ -389,4 +422,99 @@ def generate_title(body: TitleRequest):
     except Exception as e:
         logger.error(f"Title generation error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Title generation error: {str(e)}")
+
+
+# ===== RAG Configuration endpoints =====
+
+class RAGConfigRequest(BaseModel):
+    rag_n_results: Optional[int] = None
+    rag_similarity_threshold: Optional[float] = None
+    rag_max_context_tokens: Optional[int] = None
+
+
+class RAGConfigResponse(BaseModel):
+    rag_n_results: int
+    rag_similarity_threshold: float
+    rag_max_context_tokens: int
+
+
+@app.get("/rag/config", response_model=RAGConfigResponse)
+def get_rag_config(user_id: Optional[str] = None):
+    """
+    Get RAG configuration for a user.
+    Returns default values if user_id not provided or settings don't exist.
+    """
+    defaults = {
+        "rag_n_results": 3,
+        "rag_similarity_threshold": 0.0,
+        "rag_max_context_tokens": 2000
+    }
+    
+    if not user_id:
+        return RAGConfigResponse(**defaults)
+    
+    # Fetch from Supabase
+    user_config = get_user_rag_config(user_id)
+    if user_config:
+        return RAGConfigResponse(**user_config)
+    
+    # Return defaults if not found or Supabase not configured
+    return RAGConfigResponse(**defaults)
+
+
+@app.put("/rag/config", response_model=RAGConfigResponse)
+def update_rag_config(body: RAGConfigRequest, user_id: Optional[str] = None):
+    """
+    Update RAG configuration for a user.
+    
+    Note: This endpoint validates the config but doesn't save to Supabase.
+    The frontend should save directly to Supabase using its own client.
+    This endpoint just returns the validated config values.
+    """
+    # Note: We don't require user_id here since frontend handles saving
+    # But we validate the config values and return them
+    
+    # Validate input ranges
+    if body.rag_n_results is not None:
+        if body.rag_n_results < 1 or body.rag_n_results > 100:
+            raise HTTPException(
+                status_code=400, 
+                detail="rag_n_results must be between 1 and 100"
+            )
+    
+    if body.rag_similarity_threshold is not None:
+        if body.rag_similarity_threshold < 0.0 or body.rag_similarity_threshold > 1.0:
+            raise HTTPException(
+                status_code=400,
+                detail="rag_similarity_threshold must be between 0.0 and 1.0"
+            )
+    
+    if body.rag_max_context_tokens is not None:
+        if body.rag_max_context_tokens < 1 or body.rag_max_context_tokens > 10000:
+            raise HTTPException(
+                status_code=400,
+                detail="rag_max_context_tokens must be between 1 and 10000"
+            )
+    
+    # Get current config to merge with updates (optional, if user_id provided)
+    current_config = None
+    if user_id:
+        current_config = get_user_rag_config(user_id)
+    
+    defaults = {
+        "rag_n_results": 3,
+        "rag_similarity_threshold": 0.0,
+        "rag_max_context_tokens": 2000
+    }
+    
+    # Merge updates with current config (or defaults)
+    base_config = current_config if current_config else defaults
+    updated_config = {
+        "rag_n_results": body.rag_n_results if body.rag_n_results is not None else base_config["rag_n_results"],
+        "rag_similarity_threshold": body.rag_similarity_threshold if body.rag_similarity_threshold is not None else base_config["rag_similarity_threshold"],
+        "rag_max_context_tokens": body.rag_max_context_tokens if body.rag_max_context_tokens is not None else base_config["rag_max_context_tokens"],
+    }
+    
+    # Return validated config (frontend will save to Supabase)
+    return RAGConfigResponse(**updated_config)
 

@@ -20,5 +20,11 @@
   ],
   "[typescript]": {
     "editor.defaultFormatter": "denoland.vscode-deno"
-  }
+  },
+  "python.defaultInterpreterPath": "C:\\Users\\VietM\\AppData\\Local\\Programs\\Python\\Python310\\python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/backend"
+  ],
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.typeCheckingMode": "basic"
 }

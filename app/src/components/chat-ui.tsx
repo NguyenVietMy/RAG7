@@ -227,12 +227,12 @@ export default function ChatUI() {
     setError(null);
 
     try {
-      const supabase = createClient();
+      const supabaseClient = createClient();
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { user: currentUser },
+      } = await supabaseClient.auth.getUser();
 
-      if (!user) {
+      if (!currentUser) {
         setError("Please sign in to send messages");
         return;
       }
@@ -243,10 +243,10 @@ export default function ChatUI() {
 
       if (!chatIdToUse) {
         const initialTitle = userMessage.substring(0, 50) || "New chat";
-        const { data: newChat, error: chatError } = await supabase
+        const { data: newChat, error: chatError } = await supabaseClient
           .from("chats")
           .insert({
-            user_id: user.id,
+            user_id: currentUser.id,
             title: initialTitle,
             collection_name: selectedCollection,
           })
@@ -311,11 +311,40 @@ export default function ChatUI() {
       const activeChatCollection =
         activeChat?.collection_name || selectedCollection;
 
-      // Call backend API
-      const response = await apiClient.chat({
-        messages: apiMessages,
-        collection_name: activeChatCollection || undefined,
-      });
+      // Load user's RAG config from Supabase
+      let ragConfig = null;
+      try {
+        const { data: ragSettings, error: ragError } = await supabaseClient
+          .from("user_rag_settings")
+          .select("*")
+          .eq("user_id", currentUser.id)
+          .single();
+
+        if (!ragError && ragSettings) {
+          ragConfig = {
+            rag_n_results: ragSettings.rag_n_results,
+            rag_similarity_threshold: ragSettings.rag_similarity_threshold,
+            rag_max_context_tokens: ragSettings.rag_max_context_tokens,
+          };
+        }
+      } catch (err) {
+        console.warn("Failed to load RAG config, using defaults:", err);
+      }
+
+      // Call backend API (user ID already available from currentUser)
+      // Pass RAG config explicitly to ensure it's used
+      const response = await apiClient.chat(
+        {
+          messages: apiMessages,
+          collection_name: activeChatCollection || undefined,
+          ...(ragConfig && {
+            rag_n_results: ragConfig.rag_n_results,
+            rag_similarity_threshold: ragConfig.rag_similarity_threshold,
+            rag_max_context_tokens: ragConfig.rag_max_context_tokens,
+          }),
+        },
+        currentUser.id
+      );
 
       // Save assistant message
       const assistantMessageId = await saveMessage(
