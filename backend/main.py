@@ -4,9 +4,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from chroma_client import get_chroma_client, MissingEnvironmentVariableError
 import os
+import traceback
+import logging
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from embeddings import embed_texts
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 app = FastAPI(title="Lola Backend", version="0.1.0")
@@ -78,12 +84,43 @@ def create_collection(body: CreateCollectionBody):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/collections")
+def list_collections():
+    """List all collections in ChromaDB"""
+    try:
+        client = get_chroma_client()
+        collections = client.list_collections()
+        result = []
+        for col in collections:
+            try:
+                # Get collection count if possible
+                count = col.count() if hasattr(col, 'count') else None
+                result.append({
+                    "name": col.name,
+                    "metadata": col.metadata,
+                    "count": count
+                })
+            except Exception:
+                # If count fails, just return name and metadata
+                result.append({
+                    "name": col.name,
+                    "metadata": col.metadata,
+                    "count": None
+                })
+        return {"collections": result, "total": len(result)}
+    except Exception as e:
+        logger.error(f"Error listing collections: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/collections/{name}")
 def get_collection(name: str):
     try:
         client = get_chroma_client()
         col = client.get_collection(name=name)
-        return {"name": col.name, "metadata": col.metadata}
+        count = col.count() if hasattr(col, 'count') else None
+        return {"name": col.name, "metadata": col.metadata, "count": count}
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -99,21 +136,100 @@ class UpsertBody(BaseModel):
 @app.post("/collections/{name}/upsert")
 def upsert(name: str, body: UpsertBody):
     try:
+        logger.info(f"Upsert request for collection: {name}, {len(body.ids)} items")
+        
+        # Validate input lengths
+        ids_count = len(body.ids)
+        if body.documents:
+            docs_count = len(body.documents)
+            if ids_count != docs_count:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Length mismatch: {ids_count} ids but {docs_count} documents"
+                )
+        
+        if body.metadatas:
+            meta_count = len(body.metadatas)
+            if ids_count != meta_count:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Length mismatch: {ids_count} ids but {meta_count} metadatas"
+                )
+        
+        if body.embeddings:
+            emb_count = len(body.embeddings)
+            if ids_count != emb_count:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Length mismatch: {ids_count} ids but {emb_count} embeddings"
+                )
+        
         client = get_chroma_client()
         col = client.get_or_create_collection(name=name)
+        logger.info(f"Collection '{name}' retrieved/created successfully")
 
         vectors: Optional[List[List[float]]] = body.embeddings
         if vectors is None:
             if not body.documents:
                 raise HTTPException(status_code=400, detail="Provide embeddings or documents to embed")
-            vectors = embed_texts(body.documents, model=body.model)
+            
+            logger.info(f"Generating embeddings for {len(body.documents)} documents")
+            try:
+                vectors = embed_texts(body.documents, model=body.model)
+                logger.info(f"Generated {len(vectors)} embeddings")
+            except Exception as embed_error:
+                logger.error(f"Embedding error: {str(embed_error)}")
+                logger.error(traceback.format_exc())
+                raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(embed_error)}")
+        
+        if len(vectors) != ids_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Length mismatch: {ids_count} ids but {len(vectors)} embeddings"
+            )
 
-        col.upsert(ids=body.ids, embeddings=vectors, documents=body.documents, metadatas=body.metadatas)
+        logger.info(f"Calling ChromaDB upsert with {ids_count} items")
+        try:
+            # Ensure metadatas are properly formatted (ChromaDB requires specific types)
+            formatted_metadatas = None
+            if body.metadatas:
+                formatted_metadatas = []
+                for meta in body.metadatas:
+                    # Convert metadata values to ChromaDB-compatible types
+                    formatted_meta = {}
+                    for key, value in meta.items():
+                        # ChromaDB accepts str, int, float, bool, or None
+                        if isinstance(value, (str, int, float, bool)) or value is None:
+                            formatted_meta[key] = value
+                        else:
+                            # Convert other types to string
+                            formatted_meta[key] = str(value)
+                    formatted_metadatas.append(formatted_meta)
+            
+            col.upsert(
+                ids=body.ids, 
+                embeddings=vectors, 
+                documents=body.documents if body.documents else None,
+                metadatas=formatted_metadatas
+            )
+            logger.info(f"Upsert successful: {ids_count} items stored")
+        except Exception as chroma_error:
+            logger.error(f"ChromaDB upsert error: {str(chroma_error)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=500, 
+                detail=f"ChromaDB upsert failed: {str(chroma_error)}"
+            )
+        
         return {"status": "ok", "upserted": len(body.ids)}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        logger.error(f"Upsert error: {error_msg}")
+        logger.error(error_trace)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {error_msg}")
 
 
 class QueryBody(BaseModel):

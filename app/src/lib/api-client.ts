@@ -22,8 +22,10 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(error.message || `Request failed: ${response.statusText}`);
+      const error = await response.json().catch(() => ({ detail: response.statusText, message: response.statusText }));
+      // FastAPI returns errors in 'detail' field, but we also check 'message'
+      const errorMessage = error.detail || error.message || `Request failed: ${response.statusText}`;
+      throw new Error(errorMessage);
     }
 
     return response.json();
@@ -42,8 +44,12 @@ class ApiClient {
     });
   }
 
+  async listCollections() {
+    return this.request<{ collections: Array<{ name: string; metadata?: Record<string, any>; count?: number }>; total: number }>("/collections");
+  }
+
   async getCollection(name: string) {
-    return this.request<{ name: string; metadata?: Record<string, any> }>(`/collections/${name}`);
+    return this.request<{ name: string; metadata?: Record<string, any>; count?: number }>(`/collections/${name}`);
   }
 
   // Upsert documents
