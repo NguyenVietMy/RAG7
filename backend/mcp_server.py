@@ -117,6 +117,21 @@ def get_document_summary(collection_name: str, filename: str) -> dict:
     return tools_manager._get_document_summary(collection_name, filename)
 
 
+@mcp.tool(name="scrape_web_documentation")
+def scrape_web_documentation(
+    url: str,
+    collection_name: str,
+    strategy: str = "auto",
+    max_depth: int = 3,
+    max_concurrent: int = 10,
+    chunk_size: int = 5000
+) -> dict:
+    """Scrape web documentation using Crawl4AI with three intelligent strategies."""
+    return tools_manager._scrape_web_documentation(
+        url, collection_name, strategy, max_depth, max_concurrent, chunk_size
+    )
+
+
 # Register resources
 @mcp.resource("collection://{name}")
 def get_collection_resource(name: str) -> str:

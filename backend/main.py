@@ -227,6 +227,61 @@ class UpsertBody(BaseModel):
     model: Optional[str] = None  # optional override
 
 
+def trigger_auto_summarization(collection_name: str, metadatas: List[dict]):
+    """
+    Trigger automatic document summarization for uploaded files.
+    Runs in background thread (non-blocking).
+    
+    Args:
+        collection_name: Name of the ChromaDB collection
+        metadatas: List of metadata dictionaries from uploaded chunks
+    """
+    if not metadatas:
+        return
+    
+    # Extract unique filenames from metadatas
+    unique_filenames = set()
+    for metadata in metadatas:
+        filename = metadata.get("filename")
+        if filename:
+            unique_filenames.add(filename)
+    
+    if not unique_filenames:
+        return
+    
+    logger.info(f"Auto-triggering summarization for {len(unique_filenames)} file(s) in collection '{collection_name}'")
+    
+    try:
+        from document_summarizer import DocumentSummarizer
+        import threading
+        
+        def summarize_files():
+            """Background task to summarize files."""
+            summarizer = DocumentSummarizer()
+            for filename in unique_filenames:
+                try:
+                    logger.info(f"Starting auto-summarization for {filename}")
+                    result = summarizer.summarize_document(collection_name, filename)
+                    if "error" in result:
+                        logger.warning(f"Summarization failed for {filename}: {result.get('error')}")
+                    else:
+                        logger.info(
+                            f"Auto-summarization completed for {filename}: "
+                            f"{result.get('chunks_processed', 0)} chunks, "
+                            f"{result.get('llm_calls_made', 0)} LLM calls"
+                        )
+                except Exception as e:
+                    logger.error(f"Error auto-summarizing {filename}: {e}", exc_info=True)
+        
+        # Run summarization in background thread (non-blocking)
+        thread = threading.Thread(target=summarize_files, daemon=True)
+        thread.start()
+        logger.info(f"Started background summarization thread for {len(unique_filenames)} file(s)")
+    except Exception as e:
+        # Don't fail the upload if summarization setup fails
+        logger.warning(f"Could not start auto-summarization: {e}")
+
+
 @app.post("/collections/{name}/upsert")
 def upsert(name: str, body: UpsertBody):
     try:
@@ -370,6 +425,161 @@ def upsert(name: str, body: UpsertBody):
         error_msg = str(e)
         error_trace = traceback.format_exc()
         logger.error(f"Upsert error: {error_msg}")
+        logger.error(error_trace)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {error_msg}")
+
+
+@app.post("/collections/{name}/upsert-and-summarize")
+def upsert_and_summarize(name: str, body: UpsertBody):
+    """
+    Upsert documents to ChromaDB and automatically trigger summarization.
+    This endpoint combines upsert + auto-summarization in one call.
+    """
+    # First, do the upsert (reuse the same logic)
+    try:
+        logger.info(f"Upsert-and-summarize request for collection: {name}, {len(body.ids)} items")
+        
+        # Validate input lengths
+        ids_count = len(body.ids)
+        if body.documents:
+            docs_count = len(body.documents)
+            if ids_count != docs_count:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Length mismatch: {ids_count} ids but {docs_count} documents"
+                )
+        
+        if body.metadatas:
+            meta_count = len(body.metadatas)
+            if ids_count != meta_count:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Length mismatch: {ids_count} ids but {meta_count} metadatas"
+                )
+        
+        if body.embeddings:
+            emb_count = len(body.embeddings)
+            if ids_count != emb_count:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Length mismatch: {ids_count} ids but {emb_count} embeddings"
+                )
+        
+        client = get_chroma_client()
+        col = client.get_or_create_collection(name=name)
+        logger.info(f"Collection '{name}' retrieved/created successfully")
+
+        vectors: Optional[List[List[float]]] = body.embeddings
+        embedding_model_used = None
+        
+        # Clean documents to ensure valid UTF-8 (always clean if documents are provided)
+        cleaned_documents = None
+        if body.documents:
+            cleaned_documents = [clean_text_for_utf8(doc) for doc in body.documents]
+        
+        if vectors is None:
+            if not body.documents:
+                raise HTTPException(status_code=400, detail="Provide embeddings or documents to embed")
+            
+            # Determine which embedding model to use
+            embedding_model_used = body.model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+            
+            logger.info(f"Generating embeddings for {len(cleaned_documents)} documents using model: {embedding_model_used}")
+            try:
+                vectors = embed_texts(cleaned_documents, model=embedding_model_used)
+                logger.info(f"Generated {len(vectors)} embeddings")
+            except Exception as embed_error:
+                logger.error(f"Embedding error: {str(embed_error)}")
+                logger.error(traceback.format_exc())
+                raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(embed_error)}")
+        elif body.model:
+            # If embeddings provided but model specified, store it for consistency
+            embedding_model_used = body.model
+        
+        if len(vectors) != ids_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Length mismatch: {ids_count} ids but {len(vectors)} embeddings"
+            )
+
+        logger.info(f"Calling ChromaDB upsert with {ids_count} items")
+        try:
+            # Ensure metadatas are properly formatted (ChromaDB requires specific types)
+            formatted_metadatas = None
+            if body.metadatas:
+                formatted_metadatas = []
+                for meta in body.metadatas:
+                    # Convert metadata values to ChromaDB-compatible types
+                    formatted_meta = {}
+                    for key, value in meta.items():
+                        # ChromaDB accepts str, int, float, bool, or None
+                        if isinstance(value, (str, int, float, bool)) or value is None:
+                            formatted_meta[key] = value
+                        else:
+                            # Convert other types to string
+                            formatted_meta[key] = str(value)
+                    formatted_metadatas.append(formatted_meta)
+            
+            # ChromaDB has a maximum batch size of 1000, so batch if needed
+            CHROMADB_BATCH_SIZE = 1000
+            
+            if ids_count <= CHROMADB_BATCH_SIZE:
+                # Single batch
+                col.upsert(
+                    ids=body.ids, 
+                    embeddings=vectors, 
+                    documents=cleaned_documents,
+                    metadatas=formatted_metadatas
+                )
+            else:
+                # Multiple batches
+                total_batches = (ids_count + CHROMADB_BATCH_SIZE - 1) // CHROMADB_BATCH_SIZE
+                logger.info(f"Splitting into {total_batches} batches for ChromaDB upsert")
+                
+                for i in range(0, ids_count, CHROMADB_BATCH_SIZE):
+                    batch_ids = body.ids[i:i + CHROMADB_BATCH_SIZE]
+                    batch_vectors = vectors[i:i + CHROMADB_BATCH_SIZE]
+                    batch_documents = cleaned_documents[i:i + CHROMADB_BATCH_SIZE] if body.documents else None
+                    batch_metadatas = formatted_metadatas[i:i + CHROMADB_BATCH_SIZE] if formatted_metadatas else None
+                    batch_num = (i // CHROMADB_BATCH_SIZE) + 1
+                    
+                    col.upsert(
+                        ids=batch_ids,
+                        embeddings=batch_vectors,
+                        documents=batch_documents,
+                        metadatas=batch_metadatas
+                    )
+                    logger.info(f"Upserted batch {batch_num}/{total_batches} ({len(batch_ids)} items)")
+            
+            # Store embedding model in collection metadata if we generated embeddings
+            if embedding_model_used:
+                current_metadata = col.metadata or {}
+                # Only update if not already set or if it's different
+                if current_metadata.get("embedding_model") != embedding_model_used:
+                    updated_metadata = {**current_metadata, "embedding_model": embedding_model_used}
+                    col.modify(metadata=updated_metadata)
+                    logger.info(f"Updated collection metadata with embedding_model: {embedding_model_used}")
+            
+            logger.info(f"Upsert successful: {ids_count} items stored")
+            
+            # Auto-trigger document summarization for uploaded files (non-blocking)
+            if formatted_metadatas:
+                trigger_auto_summarization(name, formatted_metadatas)
+        except Exception as chroma_error:
+            logger.error(f"ChromaDB upsert error: {str(chroma_error)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=500, 
+                detail=f"ChromaDB upsert failed: {str(chroma_error)}"
+            )
+        
+        return {"status": "ok", "upserted": len(body.ids), "summarization_triggered": bool(formatted_metadatas)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        logger.error(f"Upsert-and-summarize error: {error_msg}")
         logger.error(error_trace)
         raise HTTPException(status_code=500, detail=f"Internal server error: {error_msg}")
 

@@ -1,0 +1,46 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.venv
+venv
+env
+ENV
+.env.local
+.env.*.local
+*.log
+.git
+.gitignore
+README.md
+*.md
+.pytest_cache
+.coverage
+htmlcov
+.mypy_cache
+.dmypy.json
+dmypy.json
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Test files
+test_*.py
+*_test.py
+tests/
+
+# Documentation
+docs/
+*.md
+
+# OS files
+.DS_Store
+Thumbs.db
+

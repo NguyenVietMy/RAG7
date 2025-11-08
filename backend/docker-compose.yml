@@ -3,7 +3,7 @@ services:
     image: chromadb/chroma:latest
     container_name: chromadb
     ports:
-      - "8001:8000" # Host port 8001 -> Container port 8000 (backend uses 8000)
+      - "8001:8000" # Host port 8001 -> Container port 8000
     volumes:
       - C:/ChromaDB_record:/data # ChromaDB stores data in /data by default
     environment:
@@ -11,19 +11,17 @@ services:
       - PERSIST_DIRECTORY=/data
       - ANONYMIZED_TELEMETRY=FALSE
     restart: unless-stopped
-    healthcheck:
-      test: [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:8000/api/v1/heartbeat", # v1 still works for heartbeat, but v2 is preferred
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+    # Healthcheck removed - ChromaDB container doesn't have wget/curl/python3
+    # ChromaDB is running if the container is up (check logs to verify)
+    # Alternative: use external monitoring or remove depends_on health condition
+    # healthcheck:
+    #   test: ["CMD-SHELL", "exit 0"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 3
+    #   start_period: 30s
+    networks:
+      - dss-network
 
   postgres:
     image: postgres:15-alpine
@@ -42,6 +40,46 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - dss-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PORT: 8000
+    container_name: dss-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # ChromaDB connection (use service name for internal networking)
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      # PostgreSQL connection
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=lola
+      - POSTGRES_PASSWORD=lola_dev_password
+      - POSTGRES_DB=lola_db
+      # OpenAI (set in .env file or override here)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
+    volumes:
+      # Mount .env file if it exists
+      - ./.env:/app/.env:ro
+    depends_on:
+      chromadb:
+        condition: service_started # Changed from service_healthy since healthcheck is disabled
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dss-network
 
 volumes:
   postgres_data:
+
+networks:
+  dss-network:
+    driver: bridge

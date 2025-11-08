@@ -4,6 +4,7 @@ MCP Tools Implementation
 Defines and implements all MCP tools (actions AI can take).
 """
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from chroma_client import get_chroma_client, MissingEnvironmentVariableError
@@ -177,6 +178,45 @@ class MCPTools:
                     },
                     "required": ["collection_name", "filename"]
                 }
+            },
+            {
+                "name": "scrape_web_documentation",
+                "description": "Scrape web documentation using Crawl4AI with three intelligent strategies (sitemap, text file, recursive)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "URL to scrape (can be sitemap, text file, or webpage)"
+                        },
+                        "collection_name": {
+                            "type": "string",
+                            "description": "Name of the ChromaDB collection to store scraped content"
+                        },
+                        "strategy": {
+                            "type": "string",
+                            "description": "Crawling strategy: 'auto', 'sitemap', 'text_file', or 'recursive'",
+                            "enum": ["auto", "sitemap", "text_file", "recursive"],
+                            "default": "auto"
+                        },
+                        "max_depth": {
+                            "type": "integer",
+                            "description": "Maximum recursion depth for recursive strategy",
+                            "default": 3
+                        },
+                        "max_concurrent": {
+                            "type": "integer",
+                            "description": "Maximum concurrent browser sessions",
+                            "default": 10
+                        },
+                        "chunk_size": {
+                            "type": "integer",
+                            "description": "Chunk size for markdown splitting",
+                            "default": 5000
+                        }
+                    },
+                    "required": ["url", "collection_name"]
+                }
             }
         ]
     
@@ -218,6 +258,15 @@ class MCPTools:
             return self._get_document_summary(
                 arguments.get("collection_name"),
                 arguments.get("filename")
+            )
+        elif tool_name == "scrape_web_documentation":
+            return self._scrape_web_documentation(
+                arguments.get("url"),
+                arguments.get("collection_name"),
+                arguments.get("strategy", "auto"),
+                arguments.get("max_depth", 3),
+                arguments.get("max_concurrent", 10),
+                arguments.get("chunk_size", 5000)
             )
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
@@ -416,4 +465,118 @@ class MCPTools:
             return summary
         else:
             return {"error": f"No summary found for {collection_name}/{filename}"}
+    
+    def _scrape_web_documentation(
+        self,
+        url: str,
+        collection_name: str,
+        strategy: str = "auto",
+        max_depth: int = 3,
+        max_concurrent: int = 10,
+        chunk_size: int = 5000
+    ) -> Dict[str, Any]:
+        """Scrape web documentation and store in ChromaDB."""
+        import asyncio
+        from web_scraper import smart_crawl_url
+        from chroma_client import get_chroma_client
+        from urllib.parse import urlparse
+        
+        try:
+            # Run the async crawl - handle nested event loops
+            # Use a thread pool to run the async function in a separate event loop
+            import concurrent.futures
+            
+            def run_async_in_thread():
+                """Run async function in a new thread with its own event loop."""
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(
+                        smart_crawl_url(url, strategy, max_depth, max_concurrent, chunk_size)
+                    )
+                finally:
+                    new_loop.close()
+            
+            # Execute in a separate thread to avoid event loop conflicts
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_async_in_thread)
+                crawl_result = future.result(timeout=300)  # 5 minute timeout
+            
+            if not crawl_result.get("success"):
+                return crawl_result
+            
+            chunks = crawl_result.get("chunks", [])
+            if not chunks:
+                return {
+                    "success": False,
+                    "error": "No chunks generated from scraped content"
+                }
+            
+            # Store chunks in ChromaDB
+            client = get_chroma_client()
+            collection = client.get_or_create_collection(name=collection_name)
+            
+            # Prepare data for ChromaDB
+            ids = []
+            documents = []
+            embeddings = []
+            metadatas = []
+            
+            for i, chunk in enumerate(chunks):
+                # Generate unique ID from URL, chunk index, and global index
+                # Use full URL hash to ensure uniqueness across different pages
+                url_hash = abs(hash(chunk['url'])) % 1000000
+                chunk_id = f"{urlparse(chunk['url']).netloc}_{chunk['chunk_index']}_{url_hash}_{i}"
+                ids.append(chunk_id)
+                documents.append(chunk['content'])
+                embeddings.append(chunk.get('embedding', []))
+                metadatas.append({
+                    "filename": chunk['url'],  # Use URL as filename
+                    "file_type": "web_scraped",
+                    "chunk_index": chunk['chunk_index'],
+                    "source_url": chunk['url'],
+                    "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                })
+            
+            # Upsert to ChromaDB in batches
+            CHROMADB_BATCH_SIZE = 1000
+            total_chunks = len(ids)
+            
+            if total_chunks <= CHROMADB_BATCH_SIZE:
+                collection.upsert(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=documents,
+                    metadatas=metadatas
+                )
+            else:
+                # Multiple batches
+                total_batches = (total_chunks + CHROMADB_BATCH_SIZE - 1) // CHROMADB_BATCH_SIZE
+                for i in range(0, total_chunks, CHROMADB_BATCH_SIZE):
+                    batch_ids = ids[i:i + CHROMADB_BATCH_SIZE]
+                    batch_embeddings = embeddings[i:i + CHROMADB_BATCH_SIZE]
+                    batch_documents = documents[i:i + CHROMADB_BATCH_SIZE]
+                    batch_metadatas = metadatas[i:i + CHROMADB_BATCH_SIZE]
+                    batch_num = (i // CHROMADB_BATCH_SIZE) + 1
+                    
+                    collection.upsert(
+                        ids=batch_ids,
+                        embeddings=batch_embeddings,
+                        documents=batch_documents,
+                        metadatas=batch_metadatas
+                    )
+                    logger.info(f"Upserted batch {batch_num}/{total_batches} ({len(batch_ids)} chunks)")
+            
+            return {
+                "success": True,
+                "crawl_type": crawl_result.get("crawl_type"),
+                "pages_crawled": crawl_result.get("pages_crawled", 0),
+                "chunks_created": len(chunks),
+                "chunks_stored": total_chunks,
+                "collection_name": collection_name
+            }
+            
+        except Exception as e:
+            logger.error(f"Error scraping web documentation: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
