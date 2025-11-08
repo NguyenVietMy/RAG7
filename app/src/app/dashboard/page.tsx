@@ -14,8 +14,6 @@ export default async function Dashboard() {
     return redirect("/sign-in");
   }
 
-
-
   return (
     <>
       <DashboardNavbar />
@@ -26,7 +24,9 @@ export default async function Dashboard() {
             <h1 className="text-3xl font-bold">Dashboard</h1>
             <div className="bg-secondary/50 text-sm p-3 px-4 rounded-lg text-muted-foreground flex gap-2 items-center">
               <InfoIcon size="14" />
-              <span>This is a protected page only visible to authenticated users</span>
+              <span>
+                This is a protected page only visible to authenticated users
+              </span>
             </div>
           </header>
 
