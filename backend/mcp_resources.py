@@ -38,6 +38,12 @@ class MCPResources:
                 "name": "ChromaDB Health",
                 "description": "ChromaDB connection status",
                 "mimeType": "application/json"
+            },
+            {
+                "uri": "document-summary://*/*",
+                "name": "Document Summary",
+                "description": "Stored document summary from PostgreSQL",
+                "mimeType": "application/json"
             }
         ]
     
@@ -54,6 +60,14 @@ class MCPResources:
             return self._read_rag_config_resource()
         elif uri == "chroma-health://status":
             return self._read_chroma_health_resource()
+        elif uri.startswith("document-summary://"):
+            # Format: document-summary://{collection_name}/{filename}
+            parts = uri.replace("document-summary://", "").split("/", 1)
+            if len(parts) == 2:
+                collection_name, filename = parts
+                return self._read_document_summary_resource(collection_name, filename)
+            else:
+                raise ValueError(f"Invalid document-summary URI format: {uri}")
         else:
             raise ValueError(f"Unknown resource URI: {uri}")
     
@@ -136,4 +150,24 @@ class MCPResources:
                 "error": str(e),
                 "connected": False
             }
+    
+    def _read_document_summary_resource(self, collection_name: str, filename: str) -> Dict[str, Any]:
+        """Read document summary from PostgreSQL."""
+        try:
+            from document_summarizer import DocumentSummarizer
+            summarizer = DocumentSummarizer()
+            summary = summarizer.get_summary(collection_name, filename)
+            if summary:
+                return {
+                    "filename": filename,
+                    "collection": collection_name,
+                    **summary
+                }
+            else:
+                return {
+                    "error": f"No summary found for {collection_name}/{filename}"
+                }
+        except Exception as e:
+            logger.error(f"Error reading document summary resource: {e}", exc_info=True)
+            return {"error": str(e)}
 

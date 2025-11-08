@@ -40,20 +40,20 @@ resources_manager = MCPResources()
 prompts_manager = MCPPrompts()
 
 
-# Register tools using FastMCP decorators
-@mcp.tool()
+# Register tools using FastMCP decorators with explicit names
+@mcp.tool(name="list_collections")
 def list_collections() -> dict:
     """List all ChromaDB collections with metadata."""
     return tools_manager._list_collections()
 
 
-@mcp.tool()
+@mcp.tool(name="get_collection_info")
 def get_collection_info(collection_name: str) -> dict:
     """Get collection metadata and stats."""
     return tools_manager._get_collection_info(collection_name)
 
 
-@mcp.tool()
+@mcp.tool(name="query_collection")
 def query_collection(
     collection_name: str,
     query: str,
@@ -67,7 +67,7 @@ def query_collection(
     )
 
 
-@mcp.tool()
+@mcp.tool(name="rag_chat")
 def rag_chat(
     collection_name: str,
     messages: list,
@@ -77,13 +77,13 @@ def rag_chat(
     return tools_manager._rag_chat(collection_name, messages, rag_n_results)
 
 
-@mcp.tool()
+@mcp.tool(name="get_rag_config")
 def get_rag_config() -> dict:
     """Get current RAG settings."""
     return tools_manager._get_rag_config()
 
 
-@mcp.tool()
+@mcp.tool(name="update_rag_config")
 def update_rag_config(
     rag_n_results: int = None,
     rag_similarity_threshold: float = None,
@@ -99,6 +99,22 @@ def update_rag_config(
         config["rag_max_context_tokens"] = rag_max_context_tokens
     
     return tools_manager._update_rag_config(config)
+
+
+@mcp.tool(name="summarize_document")
+def summarize_document(
+    collection_name: str,
+    filename: str,
+    chunks_per_batch: int = 25
+) -> dict:
+    """Generate hierarchical summary of a document using efficient batch processing."""
+    return tools_manager._summarize_document(collection_name, filename, chunks_per_batch)
+
+
+@mcp.tool(name="get_document_summary")
+def get_document_summary(collection_name: str, filename: str) -> dict:
+    """Retrieve stored summary for a document from PostgreSQL."""
+    return tools_manager._get_document_summary(collection_name, filename)
 
 
 # Register resources
@@ -126,6 +142,14 @@ def get_chroma_health_resource() -> str:
     return json.dumps(result, indent=2)
 
 
+@mcp.resource("document-summary://{collection}/{filename}")
+def get_document_summary_resource(collection: str, filename: str) -> str:
+    """Document summary from PostgreSQL."""
+    import json
+    result = resources_manager._read_document_summary_resource(collection, filename)
+    return json.dumps(result, indent=2)
+
+
 # Register prompts
 @mcp.prompt()
 def rag_query_template(collection_name: str, query: str) -> str:
@@ -142,7 +166,8 @@ def chat_context_template(collection_name: str, user_message: str) -> str:
 def main():
     """Entry point for MCP server."""
     logger.info("Starting MCP server with FastMCP...")
-    mcp.run()
+    # Explicitly use stdio transport for MCP protocol
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

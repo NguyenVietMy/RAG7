@@ -136,6 +136,47 @@ class MCPTools:
                         }
                     }
                 }
+            },
+            {
+                "name": "summarize_document",
+                "description": "Generate hierarchical summary of a document using efficient batch processing",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "collection_name": {
+                            "type": "string",
+                            "description": "Name of the collection"
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "Name of the file to summarize"
+                        },
+                        "chunks_per_batch": {
+                            "type": "integer",
+                            "description": "Number of chunks per batch (default: 25)",
+                            "default": 25
+                        }
+                    },
+                    "required": ["collection_name", "filename"]
+                }
+            },
+            {
+                "name": "get_document_summary",
+                "description": "Retrieve stored summary for a document from PostgreSQL",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "collection_name": {
+                            "type": "string",
+                            "description": "Name of the collection"
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "Name of the file"
+                        }
+                    },
+                    "required": ["collection_name", "filename"]
+                }
             }
         ]
     
@@ -167,6 +208,17 @@ class MCPTools:
             return self._get_rag_config()
         elif tool_name == "update_rag_config":
             return self._update_rag_config(arguments)
+        elif tool_name == "summarize_document":
+            return self._summarize_document(
+                arguments.get("collection_name"),
+                arguments.get("filename"),
+                arguments.get("chunks_per_batch", 25)
+            )
+        elif tool_name == "get_document_summary":
+            return self._get_document_summary(
+                arguments.get("collection_name"),
+                arguments.get("filename")
+            )
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
     
@@ -235,11 +287,13 @@ class MCPTools:
             query_embedding = embed_texts([query])[0]
             
             # Query collection
-            results = collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                where={"$and": []}  # Can add filters here
-            )
+            # Only include where clause if we have actual filters
+            query_kwargs = {
+                "query_embeddings": [query_embedding],
+                "n_results": n_results
+            }
+            # Note: Can add where filters here if needed in the future
+            results = collection.query(**query_kwargs)
             
             # Format results
             formatted_results = []
@@ -258,8 +312,15 @@ class MCPTools:
                     "similarity": similarity
                 }
                 
-                # TODO: Add document summary if include_summaries is True
-                # This will be implemented when document_summarizer.py is ready
+                # Add document summary if include_summaries is True
+                if include_summaries:
+                    from document_summarizer import DocumentSummarizer
+                    summarizer = DocumentSummarizer()
+                    filename = metadata.get("filename")
+                    if filename:
+                        summary_data = summarizer.get_summary(collection_name, filename)
+                        if summary_data:
+                            result_item["document_summary"] = summary_data.get("summary")
                 
                 formatted_results.append(result_item)
             
@@ -330,4 +391,29 @@ class MCPTools:
             return {"success": True, "config": get_rag_config()}
         else:
             return {"success": False, "error": "Failed to update config"}
+    
+    def _summarize_document(
+        self,
+        collection_name: str,
+        filename: str,
+        chunks_per_batch: int = 25
+    ) -> Dict[str, Any]:
+        """Generate hierarchical summary of a document."""
+        from document_summarizer import DocumentSummarizer
+        summarizer = DocumentSummarizer()
+        return summarizer.summarize_document(collection_name, filename, chunks_per_batch)
+    
+    def _get_document_summary(
+        self,
+        collection_name: str,
+        filename: str
+    ) -> Dict[str, Any]:
+        """Retrieve stored document summary."""
+        from document_summarizer import DocumentSummarizer
+        summarizer = DocumentSummarizer()
+        summary = summarizer.get_summary(collection_name, filename)
+        if summary:
+            return summary
+        else:
+            return {"error": f"No summary found for {collection_name}/{filename}"}
 
