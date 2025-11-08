@@ -52,40 +52,26 @@ Title:"""
             client = get_chroma_client()
             collection = client.get_collection(name=collection_name)
             
-            # Try to get a sample embedding to determine the expected dimension
-            # First, try with the default embedding model (text-embedding-3-small, 384 dims)
-            query_embeddings = embed_texts([query])
+            # Get embedding model from collection metadata
+            collection_metadata = collection.metadata or {}
+            embedding_model = collection_metadata.get("embedding_model")
+            
+            # If no model in metadata, use default (for backward compatibility with old collections)
+            if not embedding_model:
+                embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+            
+            # Embed query using the same model as the collection
+            query_embeddings = embed_texts([query], model=embedding_model)
             
             if not query_embeddings or len(query_embeddings) == 0:
                 return ""
             
-            embedding_dim = len(query_embeddings[0])
-            
-            # If the default embedding doesn't match, try text-embedding-ada-002 (1536 dims)
-            # This handles collections created with older embedding models
-            try:
-                results = collection.query(
-                    query_embeddings=query_embeddings,
-                    n_results=n_results,
-                    include=["documents", "metadatas", "distances"]
-                )
-            except Exception as dim_error:
-                if "dimension" in str(dim_error).lower():
-                    # Try with text-embedding-ada-002 which has 1536 dimensions
-                    try:
-                        query_embeddings = embed_texts([query], model="text-embedding-ada-002")
-                        if query_embeddings and len(query_embeddings) > 0:
-                            results = collection.query(
-                                query_embeddings=query_embeddings,
-                                n_results=n_results,
-                                include=["documents", "metadatas", "distances"]
-                            )
-                        else:
-                            return ""
-                    except Exception:
-                        return ""
-                else:
-                    raise
+            # Query ChromaDB with the correctly embedded query
+            results = collection.query(
+                query_embeddings=query_embeddings,
+                n_results=n_results,
+                include=["documents", "metadatas", "distances"]
+            )
             
             if not results or not results.get("documents") or not results["documents"][0]:
                 return ""

@@ -1,0 +1,26 @@
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: chromadb
+    ports:
+      - "8001:8000" # Host port 8001 -> Container port 8000 (backend uses 8000)
+    volumes:
+      - C:/ChromaDB_record:/chroma/chroma # Persistent storage: Windows path -> container path
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+    healthcheck:
+      test: [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8000/api/v1/heartbeat", # v1 still works for heartbeat, but v2 is preferred
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

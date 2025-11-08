@@ -32,40 +32,44 @@ app.add_middleware(
 
 @app.get("/health/chroma")
 def health_chroma():
-	try:
-		client = get_chroma_client()
-		collections = client.list_collections()
-		return JSONResponse({
-			"status": "ok",
-			"collections_count": len(collections)
-		})
-	except MissingEnvironmentVariableError as e:
-		return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
-	except Exception as e:  # noqa: BLE001
-		return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    try:
+        client = get_chroma_client()
+        collections = client.list_collections()
+        return JSONResponse({
+            "status": "ok",
+            "collections_count": len(collections)
+        })
+    except MissingEnvironmentVariableError as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @app.get("/health")
 def health():
-	return {"status": "ok"}
+    return {"status": "ok"}
 
 
 @app.get("/health/chroma/env")
 def health_chroma_env():
-	# Basic masked diagnostics to verify env is loaded correctly
-	api_key = (os.getenv("CHROMA_API_KEY") or "").strip()
-	tenant = (os.getenv("CHROMA_TENANT") or "").strip()
-	database = (os.getenv("CHROMA_DATABASE") or "Lola").strip()
-
-	return JSONResponse(
-		{
-			"api_key_present": bool(api_key),
-			"api_key_len": len(api_key),
-			"tenant_present": bool(tenant),
-			"tenant_preview": tenant[:8] + ("..." if len(tenant) > 8 else ""),
-			"database": database,
-		}
-	)
+    """Diagnostics endpoint to verify ChromaDB connection configuration."""
+    chroma_host = (os.getenv("CHROMA_HOST") or "localhost").strip()
+    chroma_port = (os.getenv("CHROMA_PORT") or "8001").strip()
+    database = (os.getenv("CHROMA_DATABASE") or "Lola").strip()
+    
+    api_key = (os.getenv("CHROMA_API_KEY") or "").strip()
+    tenant = (os.getenv("CHROMA_TENANT") or "").strip()
+    
+    mode = "cloud" if (api_key and tenant) else "self-hosted"
+    
+    return JSONResponse({
+        "mode": mode,
+        "host": chroma_host,
+        "port": chroma_port,
+        "database": database,
+        "cloud_api_key_present": bool(api_key),
+        "cloud_tenant_present": bool(tenant),
+    })
 
 
 # ===== Chroma endpoints =====
@@ -170,18 +174,25 @@ def upsert(name: str, body: UpsertBody):
         logger.info(f"Collection '{name}' retrieved/created successfully")
 
         vectors: Optional[List[List[float]]] = body.embeddings
+        embedding_model_used = None
         if vectors is None:
             if not body.documents:
                 raise HTTPException(status_code=400, detail="Provide embeddings or documents to embed")
             
-            logger.info(f"Generating embeddings for {len(body.documents)} documents")
+            # Determine which embedding model to use
+            embedding_model_used = body.model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+            
+            logger.info(f"Generating embeddings for {len(body.documents)} documents using model: {embedding_model_used}")
             try:
-                vectors = embed_texts(body.documents, model=body.model)
+                vectors = embed_texts(body.documents, model=embedding_model_used)
                 logger.info(f"Generated {len(vectors)} embeddings")
             except Exception as embed_error:
                 logger.error(f"Embedding error: {str(embed_error)}")
                 logger.error(traceback.format_exc())
                 raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(embed_error)}")
+        elif body.model:
+            # If embeddings provided but model specified, store it for consistency
+            embedding_model_used = body.model
         
         if len(vectors) != ids_count:
             raise HTTPException(
@@ -207,12 +218,46 @@ def upsert(name: str, body: UpsertBody):
                             formatted_meta[key] = str(value)
                     formatted_metadatas.append(formatted_meta)
             
-            col.upsert(
-                ids=body.ids, 
-                embeddings=vectors, 
-                documents=body.documents if body.documents else None,
-                metadatas=formatted_metadatas
-            )
+            # ChromaDB has a maximum batch size of 1000, so batch if needed
+            CHROMADB_BATCH_SIZE = 1000
+            
+            if ids_count <= CHROMADB_BATCH_SIZE:
+                # Single batch
+                col.upsert(
+                    ids=body.ids, 
+                    embeddings=vectors, 
+                    documents=body.documents if body.documents else None,
+                    metadatas=formatted_metadatas
+                )
+            else:
+                # Multiple batches
+                total_batches = (ids_count + CHROMADB_BATCH_SIZE - 1) // CHROMADB_BATCH_SIZE
+                logger.info(f"Splitting into {total_batches} batches for ChromaDB upsert")
+                
+                for i in range(0, ids_count, CHROMADB_BATCH_SIZE):
+                    batch_ids = body.ids[i:i + CHROMADB_BATCH_SIZE]
+                    batch_vectors = vectors[i:i + CHROMADB_BATCH_SIZE]
+                    batch_documents = body.documents[i:i + CHROMADB_BATCH_SIZE] if body.documents else None
+                    batch_metadatas = formatted_metadatas[i:i + CHROMADB_BATCH_SIZE] if formatted_metadatas else None
+                    batch_num = (i // CHROMADB_BATCH_SIZE) + 1
+                    
+                    col.upsert(
+                        ids=batch_ids,
+                        embeddings=batch_vectors,
+                        documents=batch_documents,
+                        metadatas=batch_metadatas
+                    )
+                    logger.info(f"Upserted batch {batch_num}/{total_batches} ({len(batch_ids)} items)")
+            
+            # Store embedding model in collection metadata if we generated embeddings
+            if embedding_model_used:
+                current_metadata = col.metadata or {}
+                # Only update if not already set or if it's different
+                if current_metadata.get("embedding_model") != embedding_model_used:
+                    updated_metadata = {**current_metadata, "embedding_model": embedding_model_used}
+                    col.modify(metadata=updated_metadata)
+                    logger.info(f"Updated collection metadata with embedding_model: {embedding_model_used}")
+            
             logger.info(f"Upsert successful: {ids_count} items stored")
         except Exception as chroma_error:
             logger.error(f"ChromaDB upsert error: {str(chroma_error)}")

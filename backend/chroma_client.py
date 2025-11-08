@@ -17,12 +17,27 @@ class MissingEnvironmentVariableError(RuntimeError):
 
 @lru_cache(maxsize=1)
 def get_chroma_client() -> chromadb.ClientAPI:
+    """
+    Get ChromaDB client. Supports both self-hosted (Docker) and cloud modes.
+    
+    Self-hosted mode (default): Uses CHROMA_HOST and CHROMA_PORT
+    Cloud mode (fallback): Uses CHROMA_API_KEY and CHROMA_TENANT if provided
+    """
+    # Check for self-hosted configuration first
+    chroma_host = (os.getenv("CHROMA_HOST") or "localhost").strip()
+    chroma_port = int(os.getenv("CHROMA_PORT") or "8001")
+    database = (os.getenv("CHROMA_DATABASE") or "Lola").strip()
+    
+    # If cloud credentials are provided, use cloud client (backward compatibility)
     api_key = (os.getenv("CHROMA_API_KEY") or "").strip()
     tenant = (os.getenv("CHROMA_TENANT") or "").strip()
-    database = (os.getenv("CHROMA_DATABASE") or "Lola").strip()
-
-    if not api_key or not tenant:
-        raise MissingEnvironmentVariableError(
-            "CHROMA_API_KEY and CHROMA_TENANT must be set in environment (.env)"
-        )
-    return chromadb.CloudClient(api_key=api_key, tenant=tenant, database=database)
+    
+    if api_key and tenant:
+        # Cloud mode (backward compatibility)
+        return chromadb.CloudClient(api_key=api_key, tenant=tenant, database=database)
+    
+    # Self-hosted mode (default) - connect to local Docker instance
+    return chromadb.HttpClient(
+        host=chroma_host,
+        port=chroma_port
+    )
