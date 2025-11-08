@@ -70,32 +70,30 @@ export default function ImportPage() {
   });
 
   return (
-    <div className="min-h-screen bg-[#0F172A]">
+    <div className="min-h-screen bg-white">
       <DashboardNavbar />
       <main className="container mx-auto px-4 pt-28 pb-16">
-        <h1 className="text-3xl font-bold text-white mb-6">Import Documents</h1>
-        <p className="text-gray-300 mb-6">
+        <h1 className="text-3xl font-bold text-black mb-6">Import Documents</h1>
+        <p className="text-black mb-6">
           Drop PDF, TXT, or MD files below. We will extract text, chunk it, and
           show the chunks on screen.
         </p>
 
         <div
-          className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors ${isDragActive ? "border-blue-400 bg-white/5" : "border-white/20 bg-white/0"}`}
+          className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors ${isDragActive ? "border-blue-400 bg-blue-50" : "border-gray-300 bg-white"}`}
           {...getRootProps()}
         >
           <input {...getInputProps()} />
-          <div className="text-gray-200">
+          <div className="text-black">
             {isDragActive
               ? "Drop the files here..."
               : "Click to select files or drag and drop here"}
           </div>
-          <div className="text-xs text-gray-400 mt-2">
-            Supported: PDF, TXT, MD
-          </div>
+          <div className="text-xs text-black mt-2">Supported: PDF, TXT, MD</div>
         </div>
 
         {error && (
-          <div className="mt-6 text-red-300 bg-red-900/30 border border-red-700/50 p-4 rounded-lg">
+          <div className="mt-6 text-red-500 bg-red-100 border border-red-700/50 p-4 rounded-lg text-black">
             {error}
           </div>
         )}
@@ -105,27 +103,27 @@ export default function ImportPage() {
             {parsedFiles.map((pf) => (
               <div
                 key={pf.name}
-                className="bg-[#0B1224] border border-white/10 rounded-xl p-6"
+                className="bg-gray-100 border border-gray-200 rounded-xl p-6"
               >
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-white">
+                  <h2 className="text-xl font-semibold text-black">
                     {pf.name}
                   </h2>
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-black">
                     {pf.chunks.length} chunks
                   </span>
                 </div>
-                <div className="text-xs text-gray-400 mb-3">{pf.type}</div>
+                <div className="text-xs text-black mb-3">{pf.type}</div>
                 <div className="grid gap-4">
                   {pf.chunks.map((chunk, idx) => (
                     <div
                       key={idx}
-                      className="bg-black/20 border border-white/10 rounded-lg p-4"
+                      className="bg-gray-200 border border-gray-300 rounded-lg p-4"
                     >
-                      <div className="text-xs text-gray-400 mb-2">
+                      <div className="text-xs text-black mb-2">
                         Chunk {idx + 1}
                       </div>
-                      <pre className="whitespace-pre-wrap text-sm text-gray-200">
+                      <pre className="whitespace-pre-wrap text-sm text-black">
                         {chunk}
                       </pre>
                     </div>

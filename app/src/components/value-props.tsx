@@ -1,37 +1,44 @@
-'use client'
+"use client";
 
-import { motion } from 'framer-motion'
-import { Zap, Database, Shield, FileCheck } from 'lucide-react'
+import { motion } from "framer-motion";
+import { Zap, Database, Shield, FileCheck } from "lucide-react";
 
 const features = [
   {
     icon: Zap,
     title: "No-Code Setup",
-    description: "Upload your documents and start chatting in minutes. No technical expertise required."
+    description:
+      "Upload your documents and start chatting in minutes. No technical expertise required.",
   },
   {
     icon: Database,
     title: "Multi-Source Intelligence",
-    description: "Combine insights from PDFs, docs, spreadsheets, and more into one intelligent system."
+    description:
+      "Combine insights from PDFs, docs, spreadsheets, and more into one intelligent system.",
   },
   {
     icon: Shield,
     title: "Private & Secure",
-    description: "Your data stays yours. Enterprise-grade encryption and privacy controls built-in."
+    description:
+      "Your data stays yours. Enterprise-grade encryption and privacy controls built-in.",
   },
   {
     icon: FileCheck,
     title: "Cited Answers",
-    description: "Every response includes source citations so you can verify and trust the information."
-  }
-]
+    description:
+      "Every response includes source citations so you can verify and trust the information.",
+  },
+];
 
 export default function ValueProps() {
   return (
-    <section id="features" className="py-24 bg-[#0F172A] relative overflow-hidden">
+    <section
+      id="features"
+      className="py-24 bg-[#0F172A] relative overflow-hidden"
+    >
       {/* Background decoration */}
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#3B82F6]/5 to-transparent" />
-      
+
       <div className="container mx-auto px-4 relative">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -41,7 +48,7 @@ export default function ValueProps() {
           className="text-center mb-16"
         >
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            Why Choose MindForge
+            Why Choose Lola
           </h2>
           <p className="text-xl text-gray-400 max-w-2xl mx-auto">
             Everything you need to build your AI decision support system
@@ -81,5 +88,5 @@ export default function ValueProps() {
         </div>
       </div>
     </section>
-  )
+  );
 }

@@ -13,7 +13,7 @@ export default function Navbar() {
       <div className="container mx-auto px-4 py-4">
         <div className="flex justify-between items-center">
           <Link href="/" className="text-2xl font-bold text-white">
-            MindForge
+            Lola
           </Link>
 
           {/* Desktop Navigation */}
@@ -34,7 +34,7 @@ export default function Navbar() {
               href="#how-it-works"
               className="text-gray-300 hover:text-white transition-colors"
             >
-              How It Works
+              How Lola Works
             </Link>
             <Link href="/sign-in">
               <Button
@@ -83,7 +83,7 @@ export default function Navbar() {
               href="#how-it-works"
               className="text-gray-300 hover:text-white transition-colors"
             >
-              How It Works
+              How Lola Works
             </Link>
             <Link
               href="/import"

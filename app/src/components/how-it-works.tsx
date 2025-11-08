@@ -1,32 +1,38 @@
-'use client'
+"use client";
 
-import { motion } from 'framer-motion'
-import { Upload, Cpu, MessageSquare } from 'lucide-react'
+import { motion } from "framer-motion";
+import { Upload, Cpu, MessageSquare } from "lucide-react";
 
 const steps = [
   {
     number: "01",
     icon: Upload,
     title: "Upload",
-    description: "Drop your documents, PDFs, or data files into MindForge. We support all major formats."
+    description:
+      "Drop your documents, PDFs, or data files into Lola. We support all major formats.",
   },
   {
     number: "02",
     icon: Cpu,
     title: "Index",
-    description: "Our AI processes and indexes your content, creating a knowledge base tailored to your needs."
+    description:
+      "Our AI processes and indexes your content, creating a knowledge base tailored to your needs.",
   },
   {
     number: "03",
     icon: MessageSquare,
     title: "Chat",
-    description: "Ask questions and get intelligent, cited answers from your AI professional instantly."
-  }
-]
+    description:
+      "Ask questions and get intelligent, cited answers from your AI professional instantly.",
+  },
+];
 
 export default function HowItWorks() {
   return (
-    <section id="how-it-works" className="py-24 bg-gradient-to-b from-[#0F172A] to-[#1E293B] relative overflow-hidden">
+    <section
+      id="how-it-works"
+      className="py-24 bg-gradient-to-b from-[#0F172A] to-[#1E293B] relative overflow-hidden"
+    >
       <div className="container mx-auto px-4 relative">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -36,7 +42,7 @@ export default function HowItWorks() {
           className="text-center mb-20"
         >
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            How It Works
+            How Lola Works
           </h2>
           <p className="text-xl text-gray-400 max-w-2xl mx-auto">
             Get started in three simple steps
@@ -89,5 +95,5 @@ export default function HowItWorks() {
         </div>
       </div>
     </section>
-  )
+  );
 }
