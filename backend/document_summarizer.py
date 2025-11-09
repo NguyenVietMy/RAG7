@@ -78,6 +78,20 @@ class DocumentSummarizer:
             Dictionary with summary, metadata, and processing stats
         """
         try:
+            # Check if summary already exists
+            existing_summary = self.get_summary(collection_name, filename)
+            if existing_summary:
+                logger.info(f"Summary already exists for '{filename}', returning cached summary")
+                return {
+                    "summary": existing_summary["summary"],
+                    "chunks_processed": existing_summary.get("chunks_processed"),
+                    "llm_calls_made": existing_summary.get("llm_calls_made", 0),
+                    "model_used": existing_summary.get("model_used"),
+                    "cached": True,
+                    "created_at": existing_summary.get("created_at"),
+                    "updated_at": existing_summary.get("updated_at")
+                }
+            
             # Get all chunks for this document
             client = get_chroma_client()
             collection = client.get_collection(collection_name)
