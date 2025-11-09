@@ -122,11 +122,18 @@ def scrape_web_documentation(
     url: str,
     collection_name: str,
     strategy: str = "auto",
-    max_depth: int = 3,
-    max_concurrent: int = 10,
+    max_depth: int = 2,
+    max_concurrent: int = 3,
     chunk_size: int = 5000
 ) -> dict:
-    """Scrape web documentation using Crawl4AI with three intelligent strategies."""
+    """Scrape web documentation using Crawl4AI with three intelligent strategies.
+    
+    Defaults are optimized to prevent resource exhaustion:
+    - max_depth: 2 (reduced from 3)
+    - max_concurrent: 3 (reduced from 10)
+    - Automatic timeout: 2 minutes
+    - Max pages: 150 for recursive, 100 for sitemap
+    """
     return tools_manager._scrape_web_documentation(
         url, collection_name, strategy, max_depth, max_concurrent, chunk_size
     )

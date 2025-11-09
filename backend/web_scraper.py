@@ -239,7 +239,9 @@ def parse_sitemap(sitemap_url: str) -> List[str]:
 async def crawl_batch(
     crawler: AsyncWebCrawler,
     urls: List[str],
-    max_concurrent: int = 10
+    max_concurrent: int = 3,
+    max_pages: int = 100,
+    timeout_seconds: int = 90
 ) -> List[Dict[str, str]]:
     """
     Batch crawl multiple URLs in parallel with memory management.
@@ -247,7 +249,9 @@ async def crawl_batch(
     Args:
         crawler: AsyncWebCrawler instance
         urls: List of URLs to crawl
-        max_concurrent: Maximum number of concurrent browser sessions (default: 10)
+        max_concurrent: Maximum number of concurrent browser sessions (default: 3)
+        max_pages: Maximum number of pages to crawl (default: 100)
+        timeout_seconds: Maximum time to spend crawling in seconds (default: 90)
     
     Returns:
         List of dictionaries with keys: 'url' and 'markdown'
@@ -255,6 +259,19 @@ async def crawl_batch(
     """
     if not CRAWL4AI_AVAILABLE:
         logger.error("crawl4ai not available, cannot perform batch crawling")
+        return []
+    
+    import time as time_module
+    start_time = time_module.time()
+    
+    # Limit number of URLs to prevent resource exhaustion
+    if len(urls) > max_pages:
+        logger.warning(f"Limiting crawl to {max_pages} pages (found {len(urls)} URLs)")
+        urls = urls[:max_pages]
+    
+    # Check timeout before starting
+    if time_module.time() - start_time > timeout_seconds:
+        logger.warning(f"Timeout reached before starting batch crawl")
         return []
     
     crawl_config = CrawlerRunConfig(
@@ -313,8 +330,10 @@ async def crawl_markdown_file(
 async def crawl_recursive_internal_links(
     crawler: AsyncWebCrawler,
     start_urls: List[str],
-    max_depth: int = 3,
-    max_concurrent: int = 10
+    max_depth: int = 2,
+    max_concurrent: int = 3,
+    max_pages: int = 150,
+    timeout_seconds: int = 90
 ) -> List[Dict[str, str]]:
     """
     Recursively crawl internal links from start URLs up to maximum depth.
@@ -322,8 +341,9 @@ async def crawl_recursive_internal_links(
     Args:
         crawler: AsyncWebCrawler instance
         start_urls: List of starting URLs (seed URLs)
-        max_depth: Maximum recursion depth (default: 3)
-        max_concurrent: Maximum concurrent browser sessions (default: 10)
+        max_depth: Maximum recursion depth (default: 2)
+        max_concurrent: Maximum concurrent browser sessions (default: 3)
+        max_pages: Maximum total pages to crawl (default: 150)
     
     Returns:
         List of dictionaries with 'url' and 'markdown' keys
@@ -355,7 +375,21 @@ async def crawl_recursive_internal_links(
     # Get base domain from first URL
     base_domain = urlparse(start_urls[0]).netloc if start_urls else None
     
+    import time as time_module
+    start_time = time_module.time()
+    
     for depth in range(max_depth):
+        # Check timeout
+        elapsed = time_module.time() - start_time
+        if elapsed > timeout_seconds:
+            logger.warning(f"Timeout reached ({elapsed:.1f}s), stopping crawl")
+            break
+        
+        # Stop if we've reached max_pages limit
+        if len(results_all) >= max_pages:
+            logger.info(f"Reached max_pages limit ({max_pages}), stopping crawl")
+            break
+        
         # Filter out already visited URLs
         urls_to_crawl = [
             normalize_url(url)
@@ -365,6 +399,15 @@ async def crawl_recursive_internal_links(
         
         if not urls_to_crawl:
             break  # No more URLs to crawl
+        
+        # Limit URLs per depth level to prevent resource exhaustion
+        if len(urls_to_crawl) > max_pages - len(results_all):
+            urls_to_crawl = urls_to_crawl[:max_pages - len(results_all)]
+            logger.info(f"Limiting crawl at depth {depth} to {len(urls_to_crawl)} URLs")
+        
+        # Add rate limiting delay between depth levels
+        if depth > 0:
+            await asyncio.sleep(1.0)  # 1 second delay between depth levels
         
         # Crawl all URLs at current depth in parallel
         results = await crawler.arun_many(
@@ -384,6 +427,10 @@ async def crawl_recursive_internal_links(
                     'url': result.url,
                     'markdown': result.markdown
                 })
+                
+                # Stop if we've reached max_pages
+                if len(results_all) >= max_pages:
+                    break
                 
                 # Extract internal links for next depth level
                 if hasattr(result, 'links') and result.links:
@@ -405,9 +452,11 @@ async def crawl_recursive_internal_links(
 async def smart_crawl_url(
     url: str,
     strategy: str = "auto",
-    max_depth: int = 3,
-    max_concurrent: int = 10,
-    chunk_size: int = 5000
+    max_depth: int = 2,
+    max_concurrent: int = 3,
+    chunk_size: int = 5000,
+    max_pages: int = 150,
+    timeout_seconds: int = 90
 ) -> Dict[str, Any]:
     """
     Intelligently crawl a URL based on its type.
@@ -415,9 +464,11 @@ async def smart_crawl_url(
     Args:
         url: URL to crawl (can be sitemap, txt file, or regular webpage)
         strategy: Crawling strategy - "auto", "sitemap", "text_file", or "recursive"
-        max_depth: Maximum recursion depth for recursive strategy (default: 3)
-        max_concurrent: Maximum concurrent browser sessions (default: 10)
+        max_depth: Maximum recursion depth for recursive strategy (default: 2)
+        max_concurrent: Maximum concurrent browser sessions (default: 3)
         chunk_size: Chunk size for markdown splitting (default: 5000)
+        max_pages: Maximum number of pages to crawl (default: 150)
+        timeout_seconds: Maximum time to spend crawling in seconds (default: 90)
     
     Returns:
         Dictionary with:
@@ -440,6 +491,9 @@ async def smart_crawl_url(
         }
     
     try:
+        import time as time_module
+        start_time = time_module.time()
+        
         crawl_results = []
         crawl_type = None
         
@@ -458,6 +512,14 @@ async def smart_crawl_url(
         )
         
         async with AsyncWebCrawler(config=browser_config) as crawler:
+            # Check timeout before crawling
+            elapsed = time_module.time() - start_time
+            if elapsed > timeout_seconds:
+                return {
+                    "success": False,
+                    "error": f"Timeout reached before starting crawl ({elapsed:.1f}s)"
+                }
+            
             if strategy == "text_file":
                 crawl_results = await crawl_markdown_file(crawler, url)
                 crawl_type = "text_file"
@@ -468,14 +530,16 @@ async def smart_crawl_url(
                         "success": False,
                         "error": "No URLs found in sitemap"
                     }
-                crawl_results = await crawl_batch(crawler, sitemap_urls, max_concurrent=max_concurrent)
+                crawl_results = await crawl_batch(crawler, sitemap_urls, max_concurrent=max_concurrent, max_pages=max_pages, timeout_seconds=timeout_seconds)
                 crawl_type = "sitemap"
             else:  # recursive
                 crawl_results = await crawl_recursive_internal_links(
                     crawler,
                     [url],
                     max_depth=max_depth,
-                    max_concurrent=max_concurrent
+                    max_concurrent=max_concurrent,
+                    max_pages=max_pages,
+                    timeout_seconds=timeout_seconds
                 )
                 crawl_type = "webpage"
         

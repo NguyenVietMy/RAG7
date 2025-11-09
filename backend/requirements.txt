@@ -10,8 +10,8 @@ psycopg2-binary==2.9.9
 # MCP Server
 fastmcp>=0.9.0
 
-# use docker if you're on windows or else uncomment crawl4ai line and download it
-#crawl4ai==0.6.2
+# crawl4ai is now installed in Docker (Linux environment supports uvloop)
+crawl4ai==0.6.2
 requests>=2.31.0
 # GitHub scraping (for future implementation)
 # PyGithub>=2.1.0

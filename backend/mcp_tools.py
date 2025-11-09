@@ -471,8 +471,8 @@ class MCPTools:
         url: str,
         collection_name: str,
         strategy: str = "auto",
-        max_depth: int = 3,
-        max_concurrent: int = 10,
+        max_depth: int = 2,
+        max_concurrent: int = 3,
         chunk_size: int = 5000
     ) -> Dict[str, Any]:
         """Scrape web documentation and store in ChromaDB."""
@@ -498,9 +498,17 @@ class MCPTools:
                     new_loop.close()
             
             # Execute in a separate thread to avoid event loop conflicts
+            # Reduced timeout to 2 minutes to prevent resource exhaustion
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(run_async_in_thread)
-                crawl_result = future.result(timeout=300)  # 5 minute timeout
+                try:
+                    crawl_result = future.result(timeout=120)  # 2 minute timeout
+                except concurrent.futures.TimeoutError:
+                    logger.error("Web scraping timed out after 2 minutes")
+                    return {
+                        "success": False,
+                        "error": "Scraping operation timed out after 2 minutes. Try reducing max_depth or max_concurrent."
+                    }
             
             if not crawl_result.get("success"):
                 return crawl_result
