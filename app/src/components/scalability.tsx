@@ -8,13 +8,13 @@ const features = [
     icon: Database,
     title: "Unlimited Documents",
     description:
-      "Add as many documents as you need. There's no limit to how much knowledge Lola can learn and retain.",
+      "Add as many documents as you need. There's no limit to how much knowledge RAG7 can learn and retain.",
   },
   {
     icon: TrendingUp,
     title: "Growing Intelligence",
     description:
-      "With each document, Lola becomes smarter, more accurate, and more valuable as your AI professional.",
+      "With each document, RAG7 becomes smarter, more accurate, and more valuable as your AI professional.",
   },
   {
     icon: Brain,

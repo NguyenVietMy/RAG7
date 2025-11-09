@@ -131,8 +131,8 @@ def scrape_web_documentation(
     Defaults are optimized to prevent resource exhaustion:
     - max_depth: 2 (reduced from 3)
     - max_concurrent: 3 (reduced from 10)
-    - Automatic timeout: 2 minutes
-    - Max pages: 150 for recursive, 100 for sitemap
+    - Automatic timeout: 10 minutes
+    - Max pages: 300 for all strategies
     """
     return tools_manager._scrape_web_documentation(
         url, collection_name, strategy, max_depth, max_concurrent, chunk_size

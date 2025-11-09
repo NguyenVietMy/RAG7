@@ -41,7 +41,7 @@ export default function Navbar() {
               href="#how-it-works"
               className="text-gray-300 hover:text-white transition-colors"
             >
-              How Lola Works
+              How RAG7 Works
             </Link>
             <Link href="/dashboard">
               <Button className="bg-[#3B82F6] hover:bg-[#2563EB] text-white">
@@ -82,7 +82,7 @@ export default function Navbar() {
               href="#how-it-works"
               className="text-gray-300 hover:text-white transition-colors"
             >
-              How Lola Works
+              How RAG7 Works
             </Link>
             <Link
               href="/import"

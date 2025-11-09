@@ -106,6 +106,26 @@ class ApiClient {
     );
   }
 
+  // Upsert and summarize documents
+  async upsertAndSummarize(
+    collectionName: string,
+    data: {
+      ids: string[];
+      documents?: string[];
+      embeddings?: number[][];
+      metadatas?: Record<string, any>[];
+      model?: string;
+    }
+  ) {
+    return this.request<{ status: string; upserted: number; summarization_triggered: boolean }>(
+      `/collections/${collectionName}/upsert-and-summarize`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
   // Query
   async query(
     collectionName: string,

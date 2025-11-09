@@ -85,6 +85,7 @@ export default function ImportPage() {
     useState<CollectionFilesData | null>(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
+  const [enableSummarize, setEnableSummarize] = useState<boolean>(false);
 
   // Fetch collections on mount
   useEffect(() => {
@@ -379,11 +380,20 @@ export default function ImportPage() {
           });
 
           // Call API to upsert (backend will handle embedding)
-          await apiClient.upsert(collectionName, {
-            ids,
-            documents,
-            metadatas,
-          });
+          // Use upsert-and-summarize if toggle is enabled, otherwise use regular upsert
+          if (enableSummarize) {
+            await apiClient.upsertAndSummarize(collectionName, {
+              ids,
+              documents,
+              metadatas,
+            });
+          } else {
+            await apiClient.upsert(collectionName, {
+              ids,
+              documents,
+              metadatas,
+            });
+          }
 
           // Update status to success
           setUploadStatuses((prev) => {
@@ -420,9 +430,10 @@ export default function ImportPage() {
       }
 
       if (totalUploaded > 0) {
-        setSuccessMessage(
-          `Successfully uploaded ${totalUploaded} chunks from ${filesToUpload.length} file(s) to collection "${collectionName}"`
-        );
+        const message = enableSummarize
+          ? `Successfully uploaded ${totalUploaded} chunks from ${filesToUpload.length} file(s) to collection "${collectionName}". Summarization has been triggered in the background.`
+          : `Successfully uploaded ${totalUploaded} chunks from ${filesToUpload.length} file(s) to collection "${collectionName}"`;
+        setSuccessMessage(message);
       }
     } catch (err: any) {
       console.error("Upload process error:", err);
@@ -430,7 +441,7 @@ export default function ImportPage() {
     } finally {
       setIsUploading(false);
     }
-  }, [collectionName, parsedFiles, uploadedFiles]);
+  }, [collectionName, parsedFiles, uploadedFiles, enableSummarize]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -609,7 +620,7 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* Upload Button */}
+        {/* Upload Options and Button */}
         {parsedFiles.length > 0 &&
           (() => {
             const filesToUpload = parsedFiles.filter(
@@ -618,7 +629,28 @@ export default function ImportPage() {
             const allUploaded = filesToUpload.length === 0;
 
             return (
-              <div className="mt-6">
+              <div className="mt-6 space-y-4">
+                {/* Summarize Toggle */}
+                <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <input
+                    type="checkbox"
+                    id="summarize-toggle"
+                    checked={enableSummarize}
+                    onChange={(e) => setEnableSummarize(e.target.checked)}
+                    disabled={isUploading}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                  <label
+                    htmlFor="summarize-toggle"
+                    className="text-sm font-medium text-black cursor-pointer"
+                  >
+                    Summarize documents after upload
+                  </label>
+                  <span className="text-xs text-gray-500">
+                    (Automatically generate summaries for uploaded files)
+                  </span>
+                </div>
+
                 <button
                   onClick={handleUpload}
                   disabled={
@@ -637,7 +669,9 @@ export default function ImportPage() {
                   }`}
                 >
                   {isUploading
-                    ? "Uploading..."
+                    ? enableSummarize
+                      ? "Uploading and summarizing..."
+                      : "Uploading..."
                     : allUploaded
                       ? "All files already uploaded"
                       : `Upload ${filesToUpload.length} file(s) to ChromaDB`}
