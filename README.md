@@ -1,4 +1,4 @@
-# DSS Knowledge Base
+RAG7
 
 **Revolutionize your vibe-coding workflow with our new intelligent knowledge base that can scale literally infinitely.**
 
