@@ -77,6 +77,39 @@ services:
     networks:
       - dss-network
 
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dss-mcp-server
+    environment:
+      # ChromaDB connection (use service name for internal networking)
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      # PostgreSQL connection
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=lola
+      - POSTGRES_PASSWORD=lola_dev_password
+      - POSTGRES_DB=lola_db
+      # OpenAI (set in .env file or override here)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
+    volumes:
+      # Mount .env file if it exists
+      - ./.env:/app/.env:ro
+    # Keep container running but don't start MCP server automatically
+    # MCP server will be started on-demand via docker exec from Cursor
+    command: tail -f /dev/null
+    depends_on:
+      chromadb:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dss-network
+
 volumes:
   postgres_data:
 
