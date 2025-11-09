@@ -139,6 +139,34 @@ def scrape_web_documentation(
     )
 
 
+@mcp.tool(name="scrape_github_repo")
+def scrape_github_repo(
+    repo_url: str,
+    collection_name: str,
+    include_patterns: list = None,
+    exclude_patterns: list = None,
+    max_file_size_kb: int = 100,
+    chunk_size: int = 5000,
+    include_readme: bool = True,
+    include_code: bool = True
+) -> dict:
+    """Scrape and ingest GitHub repository (code, READMEs, docs) into ChromaDB.
+    
+    Clones the repository, extracts code and documentation files, chunks them
+    with context, generates embeddings, and stores in ChromaDB.
+    """
+    return tools_manager._scrape_github_repo(
+        repo_url,
+        collection_name,
+        include_patterns or [],
+        exclude_patterns or [],
+        max_file_size_kb,
+        chunk_size,
+        include_readme,
+        include_code
+    )
+
+
 # Register resources
 @mcp.resource("collection://{name}")
 def get_collection_resource(name: str) -> str:

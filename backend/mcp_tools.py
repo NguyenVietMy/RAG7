@@ -217,6 +217,56 @@ class MCPTools:
                     },
                     "required": ["url", "collection_name"]
                 }
+            },
+            {
+                "name": "scrape_github_repo",
+                "description": "Scrape and ingest GitHub repository (code, READMEs, docs) into ChromaDB",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "repo_url": {
+                            "type": "string",
+                            "description": "GitHub repository URL (e.g., 'https://github.com/user/repo')"
+                        },
+                        "collection_name": {
+                            "type": "string",
+                            "description": "Name of the ChromaDB collection to store scraped content"
+                        },
+                        "include_patterns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "File patterns to include (e.g., ['*.py', '*.md'])",
+                            "default": []
+                        },
+                        "exclude_patterns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "File patterns to exclude (e.g., ['test_*.py', '*/tests/*'])",
+                            "default": []
+                        },
+                        "max_file_size_kb": {
+                            "type": "integer",
+                            "description": "Maximum file size in KB to process",
+                            "default": 100
+                        },
+                        "chunk_size": {
+                            "type": "integer",
+                            "description": "Chunk size for text splitting",
+                            "default": 5000
+                        },
+                        "include_readme": {
+                            "type": "boolean",
+                            "description": "Whether to include README files",
+                            "default": True
+                        },
+                        "include_code": {
+                            "type": "boolean",
+                            "description": "Whether to include code files",
+                            "default": True
+                        }
+                    },
+                    "required": ["repo_url", "collection_name"]
+                }
             }
         ]
     
@@ -267,6 +317,17 @@ class MCPTools:
                 arguments.get("max_depth", 3),
                 arguments.get("max_concurrent", 10),
                 arguments.get("chunk_size", 5000)
+            )
+        elif tool_name == "scrape_github_repo":
+            return self._scrape_github_repo(
+                arguments.get("repo_url"),
+                arguments.get("collection_name"),
+                arguments.get("include_patterns"),
+                arguments.get("exclude_patterns"),
+                arguments.get("max_file_size_kb", 100),
+                arguments.get("chunk_size", 5000),
+                arguments.get("include_readme", True),
+                arguments.get("include_code", True)
             )
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
@@ -586,5 +647,59 @@ class MCPTools:
             
         except Exception as e:
             logger.error(f"Error scraping web documentation: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+    
+    def _scrape_github_repo(
+        self,
+        repo_url: str,
+        collection_name: str,
+        include_patterns: Optional[List[str]] = None,
+        exclude_patterns: Optional[List[str]] = None,
+        max_file_size_kb: int = 100,
+        chunk_size: int = 5000,
+        include_readme: bool = True,
+        include_code: bool = True
+    ) -> Dict[str, Any]:
+        """Scrape GitHub repository and store in ChromaDB."""
+        import asyncio
+        from github_scraper import scrape_github_repo
+        import concurrent.futures
+        
+        try:
+            # Run async function in separate thread to avoid event loop conflicts
+            def run_async_in_thread():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(
+                        scrape_github_repo(
+                            repo_url,
+                            collection_name,
+                            include_patterns,
+                            exclude_patterns,
+                            max_file_size_kb,
+                            chunk_size,
+                            include_readme,
+                            include_code
+                        )
+                    )
+                finally:
+                    new_loop.close()
+            
+            # Execute in a separate thread
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_async_in_thread)
+                try:
+                    result = future.result(timeout=300)  # 5 minute timeout
+                    return result
+                except concurrent.futures.TimeoutError:
+                    logger.error("GitHub scraping timed out after 5 minutes")
+                    return {
+                        "success": False,
+                        "error": "Scraping operation timed out after 5 minutes."
+                    }
+        
+        except Exception as e:
+            logger.error(f"Error scraping GitHub repository: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
