@@ -542,6 +542,16 @@ class MCPTools:
         from chroma_client import get_chroma_client
         from urllib.parse import urlparse
         
+        logger.info("=" * 80)
+        logger.info(f"🌐 Starting web documentation scrape")
+        logger.info(f"   URL: {url}")
+        logger.info(f"   Collection: {collection_name}")
+        logger.info(f"   Strategy: {strategy}")
+        logger.info(f"   Max depth: {max_depth}")
+        logger.info(f"   Max concurrent: {max_concurrent}")
+        logger.info(f"   Chunk size: {chunk_size}")
+        logger.info("=" * 80)
+        
         try:
             # Run the async crawl - handle nested event loops
             # Use a thread pool to run the async function in a separate event loop
@@ -560,28 +570,42 @@ class MCPTools:
             
             # Execute in a separate thread to avoid event loop conflicts
             # Reduced timeout to 2 minutes to prevent resource exhaustion
+            logger.info(f"🕷️  Step 1/3: Starting web crawl...")
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(run_async_in_thread)
                 try:
                     crawl_result = future.result(timeout=120)  # 2 minute timeout
                 except concurrent.futures.TimeoutError:
-                    logger.error("Web scraping timed out after 2 minutes")
+                    logger.error("=" * 80)
+                    logger.error("❌ Web scraping timed out after 2 minutes")
+                    logger.error("=" * 80)
                     return {
                         "success": False,
                         "error": "Scraping operation timed out after 2 minutes. Try reducing max_depth or max_concurrent."
                     }
             
             if not crawl_result.get("success"):
+                logger.error("=" * 80)
+                logger.error(f"❌ Crawl failed: {crawl_result.get('error', 'Unknown error')}")
+                logger.error("=" * 80)
                 return crawl_result
+            
+            pages_crawled = crawl_result.get("pages_crawled", 0)
+            crawl_type = crawl_result.get("crawl_type", "unknown")
+            logger.info(f"✅ Crawl complete: {pages_crawled} pages crawled using {crawl_type} strategy")
             
             chunks = crawl_result.get("chunks", [])
             if not chunks:
+                logger.error("❌ No chunks generated from scraped content")
                 return {
                     "success": False,
                     "error": "No chunks generated from scraped content"
                 }
             
+            logger.info(f"📦 Step 2/3: Processing {len(chunks)} chunks...")
+            
             # Store chunks in ChromaDB
+            logger.info(f"💾 Step 3/3: Storing chunks in ChromaDB collection: {collection_name}")
             client = get_chroma_client()
             collection = client.get_or_create_collection(name=collection_name)
             
@@ -590,7 +614,9 @@ class MCPTools:
             documents = []
             embeddings = []
             metadatas = []
+            unique_urls = set()
             
+            logger.info(f"   Preparing {len(chunks)} chunks for storage...")
             for i, chunk in enumerate(chunks):
                 # Generate unique ID from URL, chunk index, and global index
                 # Use full URL hash to ensure uniqueness across different pages
@@ -599,6 +625,7 @@ class MCPTools:
                 ids.append(chunk_id)
                 documents.append(chunk['content'])
                 embeddings.append(chunk.get('embedding', []))
+                unique_urls.add(chunk['url'])
                 metadatas.append({
                     "filename": chunk['url'],  # Use URL as filename
                     "file_type": "web_scraped",
@@ -607,20 +634,25 @@ class MCPTools:
                     "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 })
             
+            logger.info(f"   Prepared {len(ids)} chunks from {len(unique_urls)} unique URLs")
+            
             # Upsert to ChromaDB in batches
             CHROMADB_BATCH_SIZE = 1000
             total_chunks = len(ids)
             
             if total_chunks <= CHROMADB_BATCH_SIZE:
+                logger.info(f"   Upserting {total_chunks} chunks in single batch...")
                 collection.upsert(
                     ids=ids,
                     embeddings=embeddings,
                     documents=documents,
                     metadatas=metadatas
                 )
+                logger.info(f"✅ Successfully stored all chunks in ChromaDB")
             else:
                 # Multiple batches
                 total_batches = (total_chunks + CHROMADB_BATCH_SIZE - 1) // CHROMADB_BATCH_SIZE
+                logger.info(f"   Upserting {total_chunks} chunks in {total_batches} batches...")
                 for i in range(0, total_chunks, CHROMADB_BATCH_SIZE):
                     batch_ids = ids[i:i + CHROMADB_BATCH_SIZE]
                     batch_embeddings = embeddings[i:i + CHROMADB_BATCH_SIZE]
@@ -628,13 +660,25 @@ class MCPTools:
                     batch_metadatas = metadatas[i:i + CHROMADB_BATCH_SIZE]
                     batch_num = (i // CHROMADB_BATCH_SIZE) + 1
                     
+                    logger.info(f"   Upserting batch {batch_num}/{total_batches} ({len(batch_ids)} chunks)...")
                     collection.upsert(
                         ids=batch_ids,
                         embeddings=batch_embeddings,
                         documents=batch_documents,
                         metadatas=batch_metadatas
                     )
-                    logger.info(f"Upserted batch {batch_num}/{total_batches} ({len(batch_ids)} chunks)")
+                    logger.info(f"   ✅ Batch {batch_num}/{total_batches} completed")
+                logger.info(f"✅ Successfully stored all {total_chunks} chunks in ChromaDB")
+            
+            logger.info("=" * 80)
+            logger.info(f"🎉 Web scraping completed successfully!")
+            logger.info(f"   URL: {url}")
+            logger.info(f"   Pages crawled: {pages_crawled}")
+            logger.info(f"   Unique URLs: {len(unique_urls)}")
+            logger.info(f"   Chunks created: {len(chunks)}")
+            logger.info(f"   Chunks stored: {total_chunks}")
+            logger.info(f"   Collection: {collection_name}")
+            logger.info("=" * 80)
             
             return {
                 "success": True,
@@ -646,7 +690,9 @@ class MCPTools:
             }
             
         except Exception as e:
-            logger.error(f"Error scraping web documentation: {e}", exc_info=True)
+            logger.error("=" * 80)
+            logger.error(f"❌ Error scraping web documentation: {e}", exc_info=True)
+            logger.error("=" * 80)
             return {"success": False, "error": str(e)}
     
     def _scrape_github_repo(

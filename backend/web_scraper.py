@@ -521,18 +521,23 @@ async def smart_crawl_url(
                 }
             
             if strategy == "text_file":
+                logger.info(f"   Using text file strategy for: {url}")
                 crawl_results = await crawl_markdown_file(crawler, url)
                 crawl_type = "text_file"
             elif strategy == "sitemap":
+                logger.info(f"   Using sitemap strategy, parsing sitemap...")
                 sitemap_urls = parse_sitemap(url)
                 if not sitemap_urls:
+                    logger.error("   ❌ No URLs found in sitemap")
                     return {
                         "success": False,
                         "error": "No URLs found in sitemap"
                     }
+                logger.info(f"   Found {len(sitemap_urls)} URLs in sitemap, crawling...")
                 crawl_results = await crawl_batch(crawler, sitemap_urls, max_concurrent=max_concurrent, max_pages=max_pages, timeout_seconds=timeout_seconds)
                 crawl_type = "sitemap"
             else:  # recursive
+                logger.info(f"   Using recursive strategy (max_depth={max_depth}, max_pages={max_pages})...")
                 crawl_results = await crawl_recursive_internal_links(
                     crawler,
                     [url],
@@ -544,21 +549,30 @@ async def smart_crawl_url(
                 crawl_type = "webpage"
         
         if not crawl_results:
+            logger.error("   ❌ No content found after crawling")
             return {
                 "success": False,
                 "error": "No content found"
             }
         
+        logger.info(f"   ✅ Crawled {len(crawl_results)} pages successfully")
+        
         # Process all crawled pages: chunk and embed
+        logger.info(f"   Processing pages into chunks (chunk_size={chunk_size})...")
         all_chunks = []
         all_texts_for_embedding = []
         
+        processed_pages = 0
         for doc in crawl_results:
+            processed_pages += 1
             source_url = doc['url']
             markdown = doc['markdown']
             
             # Chunk the markdown
             chunks = smart_chunk_markdown(markdown, chunk_size=chunk_size)
+            
+            if processed_pages <= 5 or processed_pages % 10 == 0:
+                logger.info(f"      Processing page {processed_pages}/{len(crawl_results)}: {source_url} → {len(chunks)} chunks")
             
             # Prepare chunks for embedding
             for i, chunk in enumerate(chunks):
@@ -569,9 +583,12 @@ async def smart_crawl_url(
                 })
                 all_texts_for_embedding.append(chunk)
         
+        logger.info(f"   ✅ Created {len(all_chunks)} total chunks from {len(crawl_results)} pages")
+        
         # Generate embeddings in batches with retry logic
-        logger.info(f"Generating embeddings for {len(all_texts_for_embedding)} chunks...")
+        logger.info(f"   Generating embeddings for {len(all_texts_for_embedding)} chunks...")
         embeddings = create_embeddings_batch_with_retry(all_texts_for_embedding)
+        logger.info(f"   ✅ Generated {len(embeddings)} embeddings")
         
         # Attach embeddings to chunks
         for i, chunk_data in enumerate(all_chunks):

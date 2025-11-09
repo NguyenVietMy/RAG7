@@ -4,11 +4,12 @@ ARG PORT=8000
 
 WORKDIR /app
 
-# Install system dependencies for crawl4ai
+# Install system dependencies for crawl4ai and github_scraper
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for faster package management

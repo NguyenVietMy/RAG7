@@ -188,7 +188,13 @@ def get_repo_files(repo_path: str, include_patterns: Optional[List[str]] = None,
                 logger.warning(f"Could not read {relative_path}: {e}")
                 continue
     
-    logger.info(f"Found {len(files)} files to process ({sum(1 for f in files if f['type'] == 'code')} code, {sum(1 for f in files if f['type'] == 'doc')} docs)")
+    logger.info(f"   Scanned repository: found {len(files)} files to process")
+    if files:
+        logger.info(f"   Sample files found:")
+        for f in files[:5]:  # Show first 5 files
+            logger.info(f"      - {f['path']} ({f['type']}, {f.get('size_kb', 0):.1f}KB)")
+        if len(files) > 5:
+            logger.info(f"      ... and {len(files) - 5} more files")
     return files
 
 
@@ -323,6 +329,16 @@ async def scrape_github_repo(
     from chroma_client import get_chroma_client
     from web_scraper import create_embeddings_batch_with_retry
     
+    logger.info("=" * 80)
+    logger.info(f"🚀 Starting GitHub repository scrape")
+    logger.info(f"   Repository: {repo_url}")
+    logger.info(f"   Collection: {collection_name}")
+    logger.info(f"   Max file size: {max_file_size_kb}KB")
+    logger.info(f"   Chunk size: {chunk_size}")
+    logger.info(f"   Include README: {include_readme}")
+    logger.info(f"   Include code: {include_code}")
+    logger.info("=" * 80)
+    
     temp_dir = None
     try:
         # Create temporary directory for cloning
@@ -330,16 +346,21 @@ async def scrape_github_repo(
         repo_name = repo_url.split('/')[-1].replace('.git', '')
         clone_path = os.path.join(temp_dir, repo_name)
         
+        logger.info(f"📦 Step 1/5: Cloning repository '{repo_name}'...")
         # Clone repository
         clone_repo(repo_url, clone_path)
+        logger.info(f"✅ Repository cloned successfully to {clone_path}")
         
         # Get files from repository
+        logger.info(f"📂 Step 2/5: Scanning repository for files...")
         files = get_repo_files(
             clone_path,
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns,
             max_file_size_kb=max_file_size_kb
         )
+        
+        logger.info(f"   Found {len(files)} files to process")
         
         # Filter based on include_readme and include_code
         if not include_readme:
@@ -348,14 +369,24 @@ async def scrape_github_repo(
             files = [f for f in files if f['type'] != 'code']
         
         if not files:
+            logger.error("❌ No files found to process after filtering")
             return {
                 "success": False,
                 "error": "No files found to process"
             }
         
+        code_count = sum(1 for f in files if f['type'] == 'code')
+        doc_count = sum(1 for f in files if f['type'] == 'doc')
+        logger.info(f"✅ File scan complete: {code_count} code files, {doc_count} doc files")
+        
         # Process files into chunks
+        logger.info(f"✂️  Step 3/5: Processing files into chunks...")
         all_chunks = []
+        processed_count = 0
         for file_data in files:
+            processed_count += 1
+            if processed_count % 10 == 0 or processed_count == 1:
+                logger.info(f"   Processing file {processed_count}/{len(files)}: {file_data['path']} ({file_data['type']}, {file_data.get('size_kb', 0):.1f}KB)")
             if file_data['type'] == 'code':
                 chunks = chunk_code_with_context(
                     file_data['content'],
@@ -370,17 +401,24 @@ async def scrape_github_repo(
                     chunk_size=chunk_size
                 )
             all_chunks.extend(chunks)
+            if chunks:
+                logger.info(f"      → Created {len(chunks)} chunks from {file_data['path']}")
+        
+        logger.info(f"✅ Chunking complete: {len(all_chunks)} total chunks created")
         
         if not all_chunks:
+            logger.error("❌ No chunks created from files")
             return {
                 "success": False,
                 "error": "No chunks created from files"
             }
         
         # Generate embeddings
-        logger.info(f"Generating embeddings for {len(all_chunks)} chunks...")
+        logger.info(f"🧠 Step 4/5: Generating embeddings for {len(all_chunks)} chunks...")
         texts = [chunk['content'] for chunk in all_chunks]
+        logger.info(f"   Calling OpenAI API to generate embeddings...")
         embeddings = create_embeddings_batch_with_retry(texts)
+        logger.info(f"✅ Generated {len(embeddings)} embeddings")
         
         if len(embeddings) != len(all_chunks):
             logger.warning(f"Embedding count mismatch: {len(embeddings)} vs {len(all_chunks)}")
@@ -409,19 +447,30 @@ async def scrape_github_repo(
             metadatas.append(metadata)
         
         # Store in ChromaDB
-        logger.info(f"Storing {len(ids)} chunks in ChromaDB collection: {collection_name}")
+        logger.info(f"💾 Step 5/5: Storing {len(ids)} chunks in ChromaDB collection: {collection_name}")
         chroma_client = get_chroma_client()
         collection = chroma_client.get_or_create_collection(name=collection_name)
+        logger.info(f"   Upserting chunks to ChromaDB...")
         collection.upsert(
             ids=ids,
             documents=documents,
             embeddings=embeddings,
             metadatas=metadatas
         )
+        logger.info(f"✅ Successfully stored all chunks in ChromaDB")
         
         # Statistics
         code_files = sum(1 for f in files if f['type'] == 'code')
         doc_files = sum(1 for f in files if f['type'] == 'doc')
+        
+        logger.info("=" * 80)
+        logger.info(f"🎉 Scraping completed successfully!")
+        logger.info(f"   Repository: {repo_name}")
+        logger.info(f"   Files scraped: {len(files)} ({code_files} code, {doc_files} docs)")
+        logger.info(f"   Chunks created: {len(all_chunks)}")
+        logger.info(f"   Chunks stored: {len(ids)}")
+        logger.info(f"   Collection: {collection_name}")
+        logger.info("=" * 80)
         
         return {
             "success": True,
@@ -436,7 +485,9 @@ async def scrape_github_repo(
         }
         
     except Exception as e:
-        logger.error(f"Error scraping GitHub repository: {e}", exc_info=True)
+        logger.error("=" * 80)
+        logger.error(f"❌ Error scraping GitHub repository: {e}", exc_info=True)
+        logger.error("=" * 80)
         return {
             "success": False,
             "error": str(e)
