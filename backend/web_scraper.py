@@ -120,7 +120,34 @@ def smart_chunk_markdown(text: str, chunk_size: int = 5000) -> List[str]:
     return chunks
 
 
-def create_embeddings_batch_with_retry(texts: List[str], max_retries: int = 3) -> List[List[float]]:
+def _estimate_tokens(text: str, model: str = "text-embedding-3-small") -> int:
+    """
+    Estimate token count for a text using character-based estimation.
+    
+    Uses a conservative estimate: 1 token ≈ 4 characters for English text.
+    This is a safe approximation that works well for most cases.
+    """
+    # Rough estimate: 1 token ≈ 4 characters for English text
+    # This is conservative and works well for embedding models
+    return len(text) // 4
+
+
+def _is_token_limit_error(error: Exception) -> bool:
+    """Check if an error is related to token/context length limits."""
+    error_str = str(error).lower()
+    token_limit_indicators = [
+        "maximum context length",
+        "token limit",
+        "context length exceeded",
+        "too many tokens",
+        "maximum tokens",
+        "input is too long",
+        "context_length_exceeded"
+    ]
+    return any(indicator in error_str for indicator in token_limit_indicators)
+
+
+def create_embeddings_batch_with_retry(texts: List[str], max_retries: int = 3, batch_size: int = 2048) -> List[List[float]]:
     """
     Create embeddings for multiple texts with retry logic and exponential backoff.
     
@@ -129,15 +156,19 @@ def create_embeddings_batch_with_retry(texts: List[str], max_retries: int = 3) -
     Args:
         texts: List of texts to create embeddings for
         max_retries: Maximum number of retry attempts (default: 3)
+        batch_size: Maximum number of texts per API call (default: 2048, OpenAI's limit)
     
     Returns:
         List of embeddings (each embedding is a list of floats)
         Each embedding is 1536 dimensions for text-embedding-3-small
     
     Error Handling Strategy:
-    1. Retry up to max_retries times with exponential backoff (1s, 2s, 4s)
-    2. If batch fails after retries, fall back to individual embedding creation
-    3. If individual embedding fails, return zero vector (1536 zeros) as fallback
+    1. Split large batches into chunks of batch_size
+    2. Check token limits before sending (max ~8000 tokens per request)
+    3. Retry up to max_retries times with exponential backoff (1s, 2s, 4s)
+    4. If token limit error, split batch by token count instead of text count
+    5. If batch fails after retries, fall back to smaller batches
+    6. If individual batch fails, return zero vector (1536 zeros) as fallback
     """
     if not texts:
         return []
@@ -151,53 +182,212 @@ def create_embeddings_batch_with_retry(texts: List[str], max_retries: int = 3) -
         return [[0.0] * 1536 for _ in texts]
     
     model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-    retry_delay = 1.0  # Start with 1 second delay
+    
+    # Token limits: OpenAI embedding models typically allow ~8000 tokens per request
+    # Using 7000 as a safe limit to account for overhead
+    MAX_TOKENS_PER_BATCH = 7000
     
     http_client = httpx.Client(timeout=httpx.Timeout(120.0))
     client = OpenAI(api_key=api_key, http_client=http_client)
     
+    all_embeddings = []
+    total_texts = len(texts)
+    
     try:
-        for retry in range(max_retries):
-            try:
-                response = client.embeddings.create(
-                    model=model,
-                    input=texts
-                )
-                return [item.embedding for item in response.data]
-            except Exception as e:
-                if retry < max_retries - 1:
-                    logger.warning(f"Error creating batch embeddings (attempt {retry + 1}/{max_retries}): {e}")
-                    logger.info(f"Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    logger.error(f"Failed to create batch embeddings after {max_retries} attempts: {e}")
-                    # Fallback: Try creating embeddings one by one
-                    logger.info("Attempting to create embeddings individually...")
-                    embeddings = []
-                    successful_count = 0
+        # First pass: split by batch_size (number of texts)
+        current_batch = []
+        current_batch_tokens = 0
+        batch_num = 0
+        
+        for i, text in enumerate(texts):
+            text_tokens = _estimate_tokens(text, model)
+            
+            # Check if adding this text would exceed limits
+            would_exceed_count = len(current_batch) >= batch_size
+            would_exceed_tokens = (current_batch_tokens + text_tokens) > MAX_TOKENS_PER_BATCH
+            
+            if would_exceed_count or would_exceed_tokens:
+                # Process current batch
+                if current_batch:
+                    batch_num += 1
+                    total_batches = (total_texts + batch_size - 1) // batch_size
+                    if total_batches > 1:
+                        logger.info(f"Processing embedding batch {batch_num} ({len(current_batch)} texts, ~{current_batch_tokens} tokens)...")
                     
-                    for i, text in enumerate(texts):
-                        try:
-                            individual_response = client.embeddings.create(
-                                model=model,
-                                input=[text]
-                            )
-                            embeddings.append(individual_response.data[0].embedding)
-                            successful_count += 1
-                        except Exception as individual_error:
-                            logger.warning(f"Failed to create embedding for text {i}: {individual_error}")
-                            # Add zero embedding as fallback
-                            embeddings.append([0.0] * 1536)
+                    batch_embeddings = _process_single_batch(
+                        client, model, current_batch, batch_num, max_retries
+                    )
+                    all_embeddings.extend(batch_embeddings)
                     
-                    logger.info(f"Successfully created {successful_count}/{len(texts)} embeddings individually")
-                    return embeddings
+                    # Small delay between batches to avoid rate limiting
+                    time.sleep(0.1)
+                
+                # Start new batch
+                current_batch = [text]
+                current_batch_tokens = text_tokens
+            else:
+                # Add to current batch
+                current_batch.append(text)
+                current_batch_tokens += text_tokens
+        
+        # Process final batch
+        if current_batch:
+            batch_num += 1
+            total_batches = (total_texts + batch_size - 1) // batch_size
+            if total_batches > 1:
+                logger.info(f"Processing embedding batch {batch_num} ({len(current_batch)} texts, ~{current_batch_tokens} tokens)...")
+            
+            batch_embeddings = _process_single_batch(
+                client, model, current_batch, batch_num, max_retries
+            )
+            all_embeddings.extend(batch_embeddings)
+        
+        logger.info(f"✅ Successfully generated {len(all_embeddings)} embeddings from {total_texts} texts")
+        return all_embeddings
+        
     finally:
         http_client.close()
     
     # Final fallback: return zero vectors
     logger.error("All embedding attempts failed, returning zero vectors")
     return [[0.0] * 1536 for _ in texts]
+
+
+def _process_single_batch(
+    client: Any,
+    model: str,
+    batch_texts: List[str],
+    batch_num: int,
+    max_retries: int
+) -> List[List[float]]:
+    """
+    Process a single batch of texts, handling token limit errors by splitting further.
+    
+    Returns:
+        List of embeddings for the batch
+    """
+    retry_delay = 1.0
+    
+    # Retry logic for this batch
+    for retry in range(max_retries):
+        try:
+            response = client.embeddings.create(
+                model=model,
+                input=batch_texts
+            )
+            return [item.embedding for item in response.data]
+        except Exception as e:
+            error_str = str(e)
+            
+            # Check if it's a token limit error
+            if _is_token_limit_error(e):
+                logger.warning(f"Token limit exceeded for batch {batch_num} ({len(batch_texts)} texts). Splitting by token count...")
+                # Split by token count instead
+                return _process_batch_by_tokens(client, model, batch_texts, batch_num, max_retries)
+            
+            # For other errors, retry with exponential backoff
+            if retry < max_retries - 1:
+                logger.warning(f"Error creating batch embeddings (attempt {retry + 1}/{max_retries}): {e}")
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                logger.error(f"Failed to create batch embeddings after {max_retries} attempts: {e}")
+                # Fallback: Try smaller batches or individual calls
+                logger.info(f"Attempting to process batch {batch_num} in smaller chunks...")
+                return _process_batch_with_fallback(client, model, batch_texts, batch_num)
+    
+    # If all retries failed, return zero vectors
+    logger.warning(f"Batch {batch_num} completely failed, adding zero vectors")
+    return [[0.0] * 1536 for _ in batch_texts]
+
+
+def _process_batch_by_tokens(
+    client: Any,
+    model: str,
+    batch_texts: List[str],
+    batch_num: int,
+    max_retries: int,
+    max_tokens_per_chunk: int = 6000
+) -> List[List[float]]:
+    """
+    Process a batch by splitting it into token-limited chunks.
+    """
+    all_embeddings = []
+    current_chunk = []
+    current_chunk_tokens = 0
+    chunk_num = 0
+    
+    for text in batch_texts:
+        text_tokens = _estimate_tokens(text, model)
+        
+        if (current_chunk_tokens + text_tokens) > max_tokens_per_chunk and current_chunk:
+            # Process current chunk
+            chunk_num += 1
+            logger.info(f"  Processing token-limited chunk {chunk_num} of batch {batch_num} ({len(current_chunk)} texts, ~{current_chunk_tokens} tokens)...")
+            
+            chunk_embeddings = _process_single_batch(client, model, current_chunk, f"{batch_num}.{chunk_num}", max_retries)
+            all_embeddings.extend(chunk_embeddings)
+            
+            # Start new chunk
+            current_chunk = [text]
+            current_chunk_tokens = text_tokens
+        else:
+            current_chunk.append(text)
+            current_chunk_tokens += text_tokens
+    
+    # Process final chunk
+    if current_chunk:
+        chunk_num += 1
+        logger.info(f"  Processing token-limited chunk {chunk_num} of batch {batch_num} ({len(current_chunk)} texts, ~{current_chunk_tokens} tokens)...")
+        chunk_embeddings = _process_single_batch(client, model, current_chunk, f"{batch_num}.{chunk_num}", max_retries)
+        all_embeddings.extend(chunk_embeddings)
+    
+    return all_embeddings
+
+
+def _process_batch_with_fallback(
+    client: Any,
+    model: str,
+    batch_texts: List[str],
+    batch_num: int
+) -> List[List[float]]:
+    """
+    Fallback: Try processing in smaller sub-batches, then individual calls if needed.
+    """
+    batch_embeddings = []
+    successful_count = 0
+    
+    # Try processing in smaller sub-batches first
+    sub_batch_size = max(1, len(batch_texts) // 4)
+    for sub_start in range(0, len(batch_texts), sub_batch_size):
+        sub_end = min(sub_start + sub_batch_size, len(batch_texts))
+        sub_batch = batch_texts[sub_start:sub_end]
+        
+        try:
+            sub_response = client.embeddings.create(
+                model=model,
+                input=sub_batch
+            )
+            batch_embeddings.extend([item.embedding for item in sub_response.data])
+            successful_count += len(sub_batch)
+        except Exception as sub_error:
+            logger.warning(f"Failed sub-batch, falling back to individual calls: {sub_error}")
+            # Final fallback: individual calls
+            for text in sub_batch:
+                try:
+                    individual_response = client.embeddings.create(
+                        model=model,
+                        input=[text]
+                    )
+                    batch_embeddings.append(individual_response.data[0].embedding)
+                    successful_count += 1
+                except Exception as individual_error:
+                    logger.warning(f"Failed individual embedding: {individual_error}")
+                    batch_embeddings.append([0.0] * 1536)
+    
+    logger.info(f"Successfully created {successful_count}/{len(batch_texts)} embeddings for batch {batch_num}")
+    return batch_embeddings
 
 
 def is_sitemap(url: str) -> bool:
@@ -240,7 +430,7 @@ async def crawl_batch(
     crawler: AsyncWebCrawler,
     urls: List[str],
     max_concurrent: int = 3,
-    max_pages: int = 100,
+    max_pages: int = 300,
     timeout_seconds: int = 90
 ) -> List[Dict[str, str]]:
     """
@@ -250,7 +440,7 @@ async def crawl_batch(
         crawler: AsyncWebCrawler instance
         urls: List of URLs to crawl
         max_concurrent: Maximum number of concurrent browser sessions (default: 3)
-        max_pages: Maximum number of pages to crawl (default: 100)
+        max_pages: Maximum number of pages to crawl (default: 300)
         timeout_seconds: Maximum time to spend crawling in seconds (default: 90)
     
     Returns:
@@ -332,7 +522,7 @@ async def crawl_recursive_internal_links(
     start_urls: List[str],
     max_depth: int = 2,
     max_concurrent: int = 3,
-    max_pages: int = 150,
+    max_pages: int = 300,
     timeout_seconds: int = 90
 ) -> List[Dict[str, str]]:
     """
@@ -343,7 +533,7 @@ async def crawl_recursive_internal_links(
         start_urls: List of starting URLs (seed URLs)
         max_depth: Maximum recursion depth (default: 2)
         max_concurrent: Maximum concurrent browser sessions (default: 3)
-        max_pages: Maximum total pages to crawl (default: 150)
+        max_pages: Maximum total pages to crawl (default: 300)
     
     Returns:
         List of dictionaries with 'url' and 'markdown' keys
@@ -455,7 +645,7 @@ async def smart_crawl_url(
     max_depth: int = 2,
     max_concurrent: int = 3,
     chunk_size: int = 5000,
-    max_pages: int = 150,
+    max_pages: int = 300,
     timeout_seconds: int = 90
 ) -> Dict[str, Any]:
     """
@@ -467,7 +657,7 @@ async def smart_crawl_url(
         max_depth: Maximum recursion depth for recursive strategy (default: 2)
         max_concurrent: Maximum concurrent browser sessions (default: 3)
         chunk_size: Chunk size for markdown splitting (default: 5000)
-        max_pages: Maximum number of pages to crawl (default: 150)
+        max_pages: Maximum number of pages to crawl (default: 300)
         timeout_seconds: Maximum time to spend crawling in seconds (default: 90)
     
     Returns:

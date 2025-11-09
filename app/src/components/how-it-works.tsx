@@ -42,7 +42,7 @@ export default function HowItWorks() {
           className="text-center mb-20"
         >
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            How Lola Works
+            How RAG7 Works
           </h2>
           <p className="text-xl text-gray-400 max-w-2xl mx-auto">
             Get started in three simple steps

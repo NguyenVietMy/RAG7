@@ -80,7 +80,7 @@ export default function Hero() {
                   <span className="text-white font-bold">AI</span>
                 </div>
                 <div>
-                  <div className="text-white font-semibold">Lola</div>
+                  <div className="text-white font-semibold">RAG7</div>
                   <div className="text-gray-400 text-sm">Online</div>
                 </div>
               </div>
@@ -111,7 +111,7 @@ export default function Hero() {
                   <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-100" />
                   <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-200" />
                 </div>
-                <span>Lola is analyzing your documents...</span>
+                <span>RAG7 is analyzing your documents...</span>
               </div>
             </div>
 

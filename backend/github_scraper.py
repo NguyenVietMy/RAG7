@@ -9,6 +9,7 @@ import logging
 import subprocess
 import shutil
 import tempfile
+import time
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import re
@@ -441,9 +442,16 @@ async def scrape_github_repo(
             
             # Add metadata
             metadata = chunk['metadata'].copy()
+            # Add filename field for file tracking (required by collection management interface)
+            metadata['filename'] = chunk['metadata']['file_path']
             metadata['repo_url'] = repo_url
             metadata['repo_name'] = repo_name
             metadata['chunk_index'] = chunk['chunk_index']
+            # Add file_type if not already present
+            if 'file_type' not in metadata:
+                metadata['file_type'] = metadata.get('type', 'unknown')
+            # Add uploaded_at timestamp for consistency with web scraper
+            metadata['uploaded_at'] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             metadatas.append(metadata)
         
         # Store in ChromaDB

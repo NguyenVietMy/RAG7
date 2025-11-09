@@ -569,19 +569,19 @@ class MCPTools:
                     new_loop.close()
             
             # Execute in a separate thread to avoid event loop conflicts
-            # Reduced timeout to 2 minutes to prevent resource exhaustion
+            # Timeout set to 10 minutes for large documentation sites
             logger.info(f"🕷️  Step 1/3: Starting web crawl...")
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(run_async_in_thread)
                 try:
-                    crawl_result = future.result(timeout=120)  # 2 minute timeout
+                    crawl_result = future.result(timeout=600)  # 10 minute timeout
                 except concurrent.futures.TimeoutError:
                     logger.error("=" * 80)
-                    logger.error("❌ Web scraping timed out after 2 minutes")
+                    logger.error("❌ Web scraping timed out after 10 minutes")
                     logger.error("=" * 80)
                     return {
                         "success": False,
-                        "error": "Scraping operation timed out after 2 minutes. Try reducing max_depth or max_concurrent."
+                        "error": "Scraping operation timed out after 10 minutes. Try reducing max_depth or max_concurrent."
                     }
             
             if not crawl_result.get("success"):
